@@ -1,23 +1,27 @@
-import { Ionicons } from '@expo/vector-icons';
-import BottomSheet, {
-  BottomSheetBackdrop, BottomSheetScrollView, BottomSheetTextInput
-} from '@gorhom/bottom-sheet';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import React, { forwardRef, useCallback, useState } from 'react';
-import {
-  ActivityIndicator, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View
-} from 'react-native';
-import { theme } from '../constants/theme';
-import { Mood } from '../types/journal';
-import MoodPicker from './MoodPicker';
+// components/EntryEditor.tsx - V2 improvements
 
-interface EntryData {
-  content: string;
-  title: string;
-  mood?: Mood;
-  photoUris: string[];
-  entryDate: Date;
-}
+import { Ionicons } from '@expo/vector-icons';
+import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from '@gorhom/bottom-sheet';
+import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { 
+  Alert, 
+  Image, 
+  Keyboard, 
+  Platform, 
+  StyleSheet, 
+  Text, 
+  TouchableOpacity, 
+  View,
+  KeyboardAvoidingView,
+  ActivityIndicator
+} from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
+
+import { theme } from '@/constants/theme';
+import { EntryData } from '@/app/create';
+
+// Mood emoji mapping
+const MOOD_EMOJIS = ['😔', '🙁', '😐', '🙂', '😄'];
 
 interface EntryEditorProps {
   entryData: EntryData;
@@ -32,9 +36,15 @@ interface EntryEditorProps {
   isSaving: boolean;
   isTranscribing: boolean;
   hasContent: boolean;
+  hasLocationConfirmation?: boolean;
 }
 
-const EntryEditor = forwardRef<BottomSheet, EntryEditorProps>(
+export interface EntryEditorRef {
+  snapToIndex: (index: number) => void;
+  close: () => void;
+}
+
+const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
   ({
     entryData,
     onUpdateEntry,
@@ -47,264 +57,486 @@ const EntryEditor = forwardRef<BottomSheet, EntryEditorProps>(
     isGettingLocation,
     isSaving,
     isTranscribing,
-    hasContent
+    hasContent,
+    hasLocationConfirmation = false,
   }, ref) => {
-
+    const bottomSheetRef = useRef<BottomSheet>(null);
     const [showDatePicker, setShowDatePicker] = useState(false);
 
-    const renderBackdrop = useCallback(
-      (props: any) => (
-        <BottomSheetBackdrop
-          {...props}
-          disappearsOnIndex={-1}
-          appearsOnIndex={0}
-          opacity={0.5}
-        />
-      ),
-      []
-    );
+    // V2: Enhanced snap points for taller bottom sheet
+    const snapPoints = useMemo(() => ['40%', '85%'], []);
 
-    const onDateChange = (_e: DateTimePickerEvent, selected?: Date) => {
-      if (selected) onUpdateEntry({ ...entryData, entryDate: selected });
-      // collapse after any selection (both iOS inline & Android modal)
-      setShowDatePicker(false);
+    useImperativeHandle(ref, () => ({
+      snapToIndex: (index: number) => bottomSheetRef.current?.snapToIndex(index),
+      close: () => bottomSheetRef.current?.close(),
+    }));
+
+    const handleSheetChanges = useCallback((index: number) => {
+      if (index === -1) {
+        Keyboard.dismiss();
+      }
+    }, []);
+
+    const updateField = (field: keyof EntryData, value: any) => {
+      onUpdateEntry({ ...entryData, [field]: value });
     };
 
-    const formatDate = (date: Date) => {
-      const today = new Date();
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
-
-      if (date.toDateString() === today.toDateString()) return 'Today';
-      if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-      return date.toLocaleDateString('en-US', {
-        month: 'short', day: 'numeric',
-        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
-      });
+    const handleDateChange = (event: any, selectedDate?: Date) => {
+      setShowDatePicker(Platform.OS === 'ios');
+      if (selectedDate) {
+        updateField('entryDate', selectedDate);
+      }
     };
+
+    const handleMoodSelect = (mood: number) => {
+      updateField('mood', mood === entryData.mood ? undefined : mood);
+    };
+
+    const canSave = hasContent && !isSaving && !isTranscribing;
 
     return (
       <BottomSheet
-        ref={ref}
+        ref={bottomSheetRef}
         index={-1}
-        snapPoints={['25%', '50%', '90%']}
-        backdropComponent={renderBackdrop}
-        enablePanDownToClose={!hasContent}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
+        snapPoints={snapPoints}
+        onChange={handleSheetChanges}
+        enablePanDownToClose
+        backgroundStyle={styles.bottomSheetBackground}
+        handleIndicatorStyle={styles.handleIndicator}
+        // V2: Hide background when sheet is open to remove bottom nav visibility
+        backgroundComponent={({ style }) => (
+          <View style={[style, styles.sheetOverlay]} />
+        )}
       >
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Text style={styles.title}>
-              {isTranscribing ? 'Transcribing...' : 'Your Entry'}
-            </Text>
-            <View style={styles.headerActions}>
-              {isTranscribing && <ActivityIndicator size="small" color={theme.colors.primary} />}
-              {hasContent && !isTranscribing && (
-                <TouchableOpacity onPress={onSave} disabled={isSaving}>
-                  {isSaving
-                    ? <ActivityIndicator size="small" color={theme.colors.primary} />
-                    : <Ionicons name="checkmark-circle" size={28} color={theme.colors.primary} />
-                  }
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          <BottomSheetScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
+        <KeyboardAvoidingView 
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={100}
+        >
+          <BottomSheetScrollView 
+            contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            {/* Date Selector */}
-            <TouchableOpacity
-              style={styles.dateSelector}
-              onPress={() => setShowDatePicker(prev => !prev)}
-              activeOpacity={0.7}
+            <Text style={styles.title}>Your Entry</Text>
+
+            {/* Date Picker Section */}
+            <TouchableOpacity 
+              style={styles.dateSection} 
+              onPress={() => setShowDatePicker(true)}
             >
-              <View style={styles.dateSelectorContent}>
-                <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
-                <Text style={styles.dateSelectorText}>
-                  Entry Date: {formatDate(entryData.entryDate)}
-                </Text>
-                <Ionicons name={showDatePicker ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textSecondary} />
-              </View>
+              <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
+              <Text style={styles.dateLabel}>
+                Entry Date: {entryData.entryDate.toLocaleDateString()}
+              </Text>
+              <Ionicons name="chevron-down-outline" size={16} color={theme.colors.textSecondary} />
             </TouchableOpacity>
 
-            {/* Title */}
+            {showDatePicker && (
+              <DateTimePicker
+                value={entryData.entryDate}
+                mode="date"
+                display="default"
+                onChange={handleDateChange}
+              />
+            )}
+
+            {/* Title Input */}
+            <Text style={styles.fieldLabel}></Text>
             <BottomSheetTextInput
               style={styles.titleInput}
-              placeholder="Title (optional)"
-              placeholderTextColor={theme.colors.muted}
               value={entryData.title}
-              onChangeText={(text) => onUpdateEntry({ ...entryData, title: text })}
+              onChangeText={(text) => updateField('title', text)}
+              placeholder="Entry Ttile (optional)"
+              placeholderTextColor={theme.colors.textSecondary}
               maxLength={100}
             />
 
-            {/* Content */}
+            {/* Content Input */}
             <BottomSheetTextInput
               style={styles.contentInput}
-              placeholder={isTranscribing ? 'Transcribing your words...' : 'Write or speak your thoughts...'}
-              placeholderTextColor={theme.colors.muted}
               value={entryData.content}
-              onChangeText={(text) => onUpdateEntry({ ...entryData, content: text })}
+              onChangeText={(text) => updateField('content', text)}
+              placeholder="Write or speak your thoughts..."
+              placeholderTextColor={theme.colors.textSecondary}
               multiline
               textAlignVertical="top"
-              editable={!isTranscribing}
             />
 
-            {/* Photos */}
-            {entryData.photoUris.length > 0 && (
-              <View style={styles.photosSection}>
-                <Text style={styles.sectionLabel}>Photos</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
-                  {entryData.photoUris.map((uri, index) => (
-                    <View key={index} style={styles.photoContainer}>
-                      <Image source={{ uri }} style={styles.photo} />
-                      <TouchableOpacity style={styles.removePhotoButton} onPress={() => onRemovePhoto(index)}>
-                        <Ionicons name="close-circle" size={24} color="#FFFFFF" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </ScrollView>
+            {/* Transcription Indicator */}
+            {isTranscribing && (
+              <View style={styles.transcribingIndicator}>
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+                <Text style={styles.transcribingText}>Transcribing audio...</Text>
               </View>
             )}
 
-            {/* Attachments */}
-            <View style={styles.attachmentBar}>
-              <TouchableOpacity style={styles.attachmentButton} onPress={onTakePhoto}>
+            {/* Media and Location Actions */}
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.actionButton} onPress={onTakePhoto}>
                 <Ionicons name="camera-outline" size={22} color={theme.colors.primary} />
-                <Text style={styles.attachmentText}>Camera</Text>
+                <Text style={styles.actionButtonText}>Camera</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.attachmentButton} onPress={onPickImage}>
-                <Ionicons name="image-outline" size={22} color={theme.colors.primary} />
-                <Text style={styles.attachmentText}>Gallery</Text>
+              <TouchableOpacity style={styles.actionButton} onPress={onPickImage}>
+                <Ionicons name="images-outline" size={22} color={theme.colors.primary} />
+                <Text style={styles.actionButtonText}>Gallery</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.attachmentButton} onPress={onGetLocation}>
-                <Ionicons
-                  name="location-outline"
-                  size={22}
-                  color={isGettingLocation ? theme.colors.muted : theme.colors.primary}
-                />
-                <Text
-                  style={[
-                    styles.attachmentText,
-                    { color: isGettingLocation ? theme.colors.muted : theme.colors.primary }
-                  ]}
-                >
-                  {isGettingLocation ? 'Getting...' : 'Location'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Mood */}
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>How are you feeling?</Text>
-              <MoodPicker value={entryData.mood} onChange={(m) => onUpdateEntry({ ...entryData, mood: m })} />
-            </View>
-
-            {/* Save */}
-            <TouchableOpacity
-              style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-              onPress={onSave}
-              disabled={isSaving || isTranscribing}
-            >
-              {isSaving
-                ? <ActivityIndicator color="#FFFFFF" />
-                : <>
-                  <Ionicons name="checkmark-circle" size={24} color="#FFFFFF" />
-                  <Text style={styles.saveButtonText}>Save Entry</Text>
-                </>
-              }
-            </TouchableOpacity>
-          </BottomSheetScrollView>
-        </View>
-
-        {/* Date Picker: iOS inline (with Done), Android modal */}
-        {showDatePicker && (
-          <View style={{
-            position: 'absolute',
-            left: 0, right: 0, bottom: 0,
-            backgroundColor: '#fff',
-            borderTopLeftRadius: 16, borderTopRightRadius: 16,
-            padding: theme.spacing.lg
-          }}>
-            <Text style={{ ...theme.typography.body, fontWeight: '600', marginBottom: theme.spacing.md }}>Pick a date</Text>
-            <DateTimePicker
-              value={entryData.entryDate}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'inline' : 'default'}
-              onChange={onDateChange}
-              maximumDate={new Date()}
-            />
-            {Platform.OS === 'ios' && (
-              <TouchableOpacity
-                onPress={() => setShowDatePicker(false)}
-                style={{
-                  alignSelf: 'flex-end',
-                  backgroundColor: theme.colors.primary,
-                  paddingHorizontal: theme.spacing.lg,
-                  paddingVertical: theme.spacing.sm,
-                  borderRadius: theme.radius.sm,
-                  marginTop: theme.spacing.md
-                }}
+              <TouchableOpacity 
+                style={[
+                  styles.actionButton,
+                  hasLocationConfirmation && styles.actionButtonActive
+                ]} 
+                onPress={entryData.location ? onRemoveLocation : onGetLocation}
+                disabled={isGettingLocation}
               >
-                <Text style={{ color: '#fff', fontWeight: '600' }}>Done</Text>
+                {isGettingLocation ? (
+                  <ActivityIndicator size={20} color={theme.colors.primary} />
+                ) : (
+                  <Ionicons 
+                    name={entryData.location ? "location" : "location-outline"} 
+                    size={22} 
+                    color={hasLocationConfirmation ? '#34C759' : theme.colors.primary} 
+                  />
+                )}
+                <Text style={[
+                  styles.actionButtonText,
+                  hasLocationConfirmation && styles.actionButtonTextActive
+                ]}>
+                  {entryData.location ? 'Remove Location' : 'Location'}
+                </Text>
+                {hasLocationConfirmation && (
+                  <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                )}
               </TouchableOpacity>
+            </View>
+
+            {/* Photo Preview */}
+            {entryData.photoUris.length > 0 && (
+              <View style={styles.photoPreview}>
+                <Text style={styles.fieldLabel}>Photos ({entryData.photoUris.length})</Text>
+                <View style={styles.photoGrid}>
+                  {entryData.photoUris.map((uri, index) => (
+                    <View key={index} style={styles.photoContainer}>
+                      <Image source={{ uri }} style={styles.photo} />
+                      <TouchableOpacity
+                        style={styles.removePhotoButton}
+                        onPress={() => onRemovePhoto(index)}
+                      >
+                        <Ionicons name="close-circle" size={24} color="#FF3B30" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
             )}
-          </View>
-        )}
+
+            {/* Mood Selection */}
+            <View style={styles.moodSection}>
+              <Text style={styles.fieldLabel}>HOW ARE YOU FEELING?</Text>
+              <View style={styles.moodRow}>
+                {MOOD_EMOJIS.map((emoji, index) => {
+                  const moodValue = index + 1;
+                  const isSelected = entryData.mood === moodValue;
+                  return (
+                    <TouchableOpacity
+                      key={index}
+                      style={[styles.moodButton, isSelected && styles.moodButtonSelected]}
+                      onPress={() => handleMoodSelect(moodValue)}
+                    >
+                      <Text style={styles.moodEmoji}>{emoji}</Text>
+                      <Text style={styles.moodNumber}>{moodValue}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* V2: Enhanced Save Button with better spacing */}
+            <View style={styles.saveButtonContainer}>
+              <TouchableOpacity
+                style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+                onPress={onSave}
+                disabled={!canSave}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                    <Text style={styles.saveButtonText}>Save Entry</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* V2: Additional spacing to ensure content is visible above bottom nav area */}
+            <View style={styles.bottomSpacer} />
+          </BottomSheetScrollView>
+        </KeyboardAvoidingView>
       </BottomSheet>
     );
   }
 );
 
-const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: theme.spacing.lg },
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: theme.spacing.md, borderBottomWidth: 1, borderBottomColor: theme.colors.border,
-    marginBottom: theme.spacing.lg
-  },
-  title: { ...theme.typography.h2, color: theme.colors.text },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md },
-  scrollContent: { paddingBottom: theme.spacing.xxl },
-  dateSelector: { marginBottom: theme.spacing.lg },
-  dateSelectorContent: {
-    flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.md,
-    backgroundColor: theme.colors.surface, borderRadius: theme.radius.md
-  },
-  dateSelectorText: { flex: 1, ...theme.typography.body, color: theme.colors.text },
-  titleInput: {
-    ...theme.typography.h2, borderBottomWidth: 1, borderBottomColor: theme.colors.border,
-    paddingVertical: theme.spacing.md, marginBottom: theme.spacing.lg, color: theme.colors.text
-  },
-  contentInput: {
-    ...theme.typography.body, minHeight: 120, marginBottom: theme.spacing.lg,
-    color: theme.colors.text, lineHeight: 24
-  },
-  photosSection: { marginBottom: theme.spacing.lg },
-  photosScroll: { marginTop: theme.spacing.sm },
-  photoContainer: { marginRight: theme.spacing.sm, position: 'relative' },
-  photo: { width: 100, height: 100, borderRadius: theme.radius.md },
-  removePhotoButton: { position: 'absolute', top: -8, right: -8, backgroundColor: theme.colors.danger, borderRadius: 12 },
-  attachmentBar: {
-    flexDirection: 'row', justifyContent: 'space-around', paddingVertical: theme.spacing.md,
-    borderTopWidth: 1, borderBottomWidth: 1, borderColor: theme.colors.border, marginBottom: theme.spacing.lg
-  },
-  attachmentButton: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs, padding: theme.spacing.sm },
-  attachmentText: { ...theme.typography.caption, color: theme.colors.primary },
-  section: { marginBottom: theme.spacing.xl },
-  sectionLabel: { ...theme.typography.caption, color: theme.colors.textSecondary, marginBottom: theme.spacing.sm, textTransform: 'uppercase' },
-  saveButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: theme.spacing.sm,
-    backgroundColor: theme.colors.primary, paddingVertical: theme.spacing.lg, borderRadius: theme.radius.md, marginTop: theme.spacing.lg
-  },
-  saveButtonDisabled: { opacity: 0.5 },
-  saveButtonText: { ...theme.typography.button, color: '#FFFFFF' },
-});
+EntryEditor.displayName = 'EntryEditor';
 
 export default EntryEditor;
+
+const styles = StyleSheet.create({
+  bottomSheetBackground: {
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: theme.radius.xl,
+    borderTopRightRadius: theme.radius.xl,
+  },
+  
+  // V2: Overlay to hide bottom navigation
+  sheetOverlay: {
+    backgroundColor: theme.colors.background,
+    opacity: 1.0,
+  },
+  
+  handleIndicator: {
+    backgroundColor: theme.colors.textSecondary,
+    width: 40,
+    height: 4,
+    marginTop: theme.spacing.sm,
+  },
+  
+  container: {
+    flex: 1,
+  },
+  
+  content: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxxl, // Extra padding for better scrolling
+  },
+  
+  title: {
+    ...theme.typography.h2,
+    color: theme.colors.text,
+    textAlign: 'left',
+    marginBottom: theme.spacing.lg,
+    marginTop: theme.spacing.md,
+  },
+  
+  dateSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  
+  dateLabel: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    flex: 1,
+    fontWeight: '500',
+  },
+  
+  fieldLabel: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginBottom: theme.spacing.sm,
+  },
+  
+  titleInput: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    paddingVertical: theme.spacing.sm,
+    marginBottom: theme.spacing.lg,
+  },
+  
+  contentInput: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    backgroundColor: 'transparent',
+    minHeight: 120,
+    paddingVertical: theme.spacing.sm,
+    marginBottom: theme.spacing.lg,
+    lineHeight: 22,
+  },
+  
+  transcribingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  
+  transcribingText: {
+    ...theme.typography.body,
+    color: theme.colors.primary,
+    fontWeight: '500',
+  },
+  
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+  },
+  
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    gap: theme.spacing.xs,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  
+  actionButtonActive: {
+    backgroundColor: '#E8F5E8',
+    borderColor: '#34C759',
+  },
+  
+  actionButtonText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '500',
+  },
+  
+  actionButtonTextActive: {
+    color: '#34C759',
+  },
+  
+  locationDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E8',
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    marginBottom: theme.spacing.lg,
+    gap: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: '#34C759',
+  },
+  
+  locationText: {
+    ...theme.typography.caption,
+    color: '#2E7D32',
+    flex: 1,
+    fontWeight: '500',
+  },
+  
+  photoPreview: {
+    marginBottom: theme.spacing.lg,
+  },
+  
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+  },
+  
+  photoContainer: {
+    position: 'relative',
+    width: 80,
+    height: 80,
+  },
+  
+  photo: {
+    width: 80,
+    height: 80,
+    borderRadius: theme.radius.md,
+  },
+  
+  removePhotoButton: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+  },
+  
+  moodSection: {
+    marginBottom: theme.spacing.xl,
+  },
+  
+  moodRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: theme.spacing.sm,
+  },
+  
+  moodButton: {
+    flex: 1,
+    alignItems: 'center',
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  
+  moodButtonSelected: {
+    backgroundColor: theme.colors.primary + '20',
+    borderColor: theme.colors.primary,
+  },
+  
+  moodEmoji: {
+    fontSize: 24,
+    marginBottom: theme.spacing.xs,
+  },
+  
+  moodNumber: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  
+  saveButtonContainer: {
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+  
+  saveButton: {
+    backgroundColor: theme.colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.lg,
+    borderRadius: theme.radius.lg,
+    gap: theme.spacing.sm,
+    shadowColor: theme.colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  
+  saveButtonDisabled: {
+    backgroundColor: theme.colors.textSecondary,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  
+  saveButtonText: {
+    ...theme.typography.body,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  
+  // V2: Extra spacing to ensure content is visible above bottom navigation
+  bottomSpacer: {
+    height: 100, // Ensures content is visible above bottom navigation
+  },
+});

@@ -42,6 +42,21 @@ export default forwardRef<EntryDetailSheetRef, { entry: Entry | null; onDismiss?
       ]);
     };
 
+    // Fixed location access - check if location exists and has the proper structure
+    const getLocationText = () => {
+      let locationData = entry.locationData;
+      if (!locationData) return null;
+      
+      return locationData.place?.name || 
+             locationData.address?.formattedAddress ||
+             locationData.address?.city ||
+             (locationData.coordinates ? 
+               `${locationData.coordinates.latitude.toFixed(4)}, ${locationData.coordinates.longitude.toFixed(4)}` : 
+               null);
+    };
+
+    const locationText = getLocationText();
+
     return (
       <BottomSheetModal
         ref={ref}
@@ -86,25 +101,30 @@ export default forwardRef<EntryDetailSheetRef, { entry: Entry | null; onDismiss?
             </View>
           )}
 
-          {!!entry.photoUris?.length && (
+          {/* Fixed photo display - only check photoUris */}
+          {!!(entry.photoUris?.length) && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Photos</Text>
+              <Text style={styles.sectionTitle}>Photos ({entry.photoUris.length})</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photosScroll}>
                 {entry.photoUris.map((uri, i) => (
-                  <Image key={`${entry.id}-photo-${i}`} source={{ uri }} style={styles.photo} />
+                  <Image 
+                    key={`${entry.id}-photo-${i}`} 
+                    source={{ uri }} 
+                    style={styles.photo}
+                    onError={(error) => {
+                      console.log('Image load error for URI:', uri, error.nativeEvent.error);
+                    }}
+                  />
                 ))}
               </ScrollView>
             </View>
           )}
 
-          {!!entry.locationData && (
+          {/* Fixed location display */}
+          {locationText && (
             <View style={styles.locationSection}>
               <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.locationText}>
-                {entry.locationData.locationData?.place?.name ||
-                  entry.locationData.locationData?.address?.city ||
-                  'Unknown Location'}
-              </Text>
+              <Text style={styles.locationText}>{locationText}</Text>
             </View>
           )}
 
@@ -145,14 +165,40 @@ const styles = StyleSheet.create({
   moodText: { ...theme.typography.body, color: theme.colors.textSecondary },
   section: { marginBottom: theme.spacing.xl },
   sectionTitle: { ...theme.typography.body, fontWeight: '600', color: theme.colors.text, marginBottom: theme.spacing.md },
+  bodyContainer: {
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.md,
+  },
+  body: { 
+    ...theme.typography.body, 
+    color: theme.colors.text,
+    lineHeight: 22,
+  },
   photosScroll: { marginHorizontal: -theme.spacing.sm },
   photo: {
     width: 120, height: 120, borderRadius: theme.radius.md, marginHorizontal: theme.spacing.sm,
     backgroundColor: theme.colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1, shadowRadius: 4, elevation: 2,
   },
-  locationSection: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.xs, marginBottom: theme.spacing.lg, paddingVertical: theme.spacing.sm },
-  locationText: { ...theme.typography.caption, color: theme.colors.textSecondary, fontWeight: '500' },
+  locationSection: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: theme.spacing.xs, 
+    marginBottom: theme.spacing.lg, 
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: '#E8F5E8',
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: '#34C759',
+  },
+  locationText: { 
+    ...theme.typography.caption, 
+    color: '#2E7D32', 
+    fontWeight: '500',
+    flex: 1,
+  },
   tagsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm },
   tag: {
     backgroundColor: theme.colors.surface, paddingHorizontal: theme.spacing.md, paddingVertical: theme.spacing.xs,

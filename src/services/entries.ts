@@ -252,6 +252,15 @@ export class EntriesService {
       if (!grouped[e.date]) grouped[e.date] = [];
       grouped[e.date].push(e);
     });
+
+    console.log('=== DEBUG DATE ISSUE ===');
+    console.log('Raw grouped keys:', Object.keys(grouped));
+    console.log('Current entries from context:', entries.map(e => ({
+      id: e.id,
+      date: e.date,
+      title: e.title,
+      createdAt: e.createdAt
+    })));
     return grouped;
   }
 
@@ -259,7 +268,10 @@ export class EntriesService {
     const entries = await this.listEntries();
     const grouped: GroupedEntries = {};
     entries.forEach(e => {
-      const weekStart = formatDate(startOfWeek(new Date(e.date)));
+      // Parse the date string manually to avoid timezone issues
+      const [y, m, d] = e.date.split('-').map(n => parseInt(n, 10));
+      const entryDate = new Date(y, m - 1, d); // Local date at midnight
+      const weekStart = formatDate(startOfWeek(entryDate));
       if (!grouped[weekStart]) grouped[weekStart] = [];
       grouped[weekStart].push(e);
     });

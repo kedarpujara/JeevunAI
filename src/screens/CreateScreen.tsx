@@ -1,4 +1,4 @@
-// app/create.tsx (or wherever CreateScreen lives)
+// app/create.tsx (V2 improvements)
 
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from '@gorhom/bottom-sheet';
@@ -53,6 +53,7 @@ export default function CreateScreen() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [hasLocationConfirmation, setHasLocationConfirmation] = useState(false);
 
   const hasContent =
     entryData.content.trim().length > 0 ||
@@ -204,7 +205,10 @@ export default function CreateScreen() {
     setIsGettingLocation(true);
     try {
       const loc = await getCurrentLocation();
-      if (loc) setEntryData((p) => ({ ...p, location: loc }));
+      if (loc) {
+        setEntryData((p) => ({ ...p, location: loc }));
+        setHasLocationConfirmation(true);
+      }
     } catch {
       Alert.alert('Error', 'Failed to get location.');
     } finally {
@@ -212,7 +216,11 @@ export default function CreateScreen() {
     }
   };
 
-  const handleRemoveLocation = () => setEntryData((p) => ({ ...p, location: undefined }));
+  const handleRemoveLocation = () => {
+    setEntryData((p) => ({ ...p, location: undefined }));
+    setHasLocationConfirmation(false);
+  };
+
   const handleRemovePhoto = (index: number) =>
     setEntryData((p) => ({ ...p, photoUris: p.photoUris.filter((_, i) => i !== index) }));
 
@@ -277,6 +285,7 @@ export default function CreateScreen() {
         location: undefined,
         entryDate: new Date(),
       });
+      setHasLocationConfirmation(false);
     } catch (e: any) {
       console.error('Save error:', e);
       Alert.alert('Save Error', e?.message ?? 'Could not save entry.');
@@ -287,7 +296,7 @@ export default function CreateScreen() {
 
   const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  // ---- derived UI state for the subtle “added” pills
+  // ---- derived UI state for the subtle "added" pills
   const hasLocation = !!entryData.location;
   const photoCount = entryData.photoUris.length;
 
@@ -298,15 +307,17 @@ export default function CreateScreen() {
         contentContainerStyle={styles.mainContentContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Date header (centered) */}
+        {/* Enhanced Date header with better background */}
         <View style={styles.dateHeader}>
           <View style={styles.dateHeaderTop}>
             <View style={{ width: 24 }} />
-            <Text style={styles.dateText}>
-              {new Date().toLocaleDateString('en-US', {
-                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-              })}
-            </Text>
+            <View style={styles.dateBackground}>
+              <Text style={styles.dateText}>
+                {new Date().toLocaleDateString('en-US', {
+                  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                })}
+              </Text>
+            </View>
             <View style={{ width: 24 }} />
           </View>
         </View>
@@ -376,29 +387,9 @@ export default function CreateScreen() {
             </Text>
           </View>
         </View>
-
-        {/* Subtle status pills — only visible when something’s added */}
-        {(hasLocation || photoCount > 0) && (
-          <View style={styles.statusRow}>
-            {hasLocation && (
-              <View style={styles.pill}>
-                <Ionicons name="location-outline" size={14} color="#34C759" />
-                <Text style={styles.pillText}>Location</Text>
-                <Ionicons name="checkmark" size={14} color="#34C759" />
-              </View>
-            )}
-            {photoCount > 0 && (
-              <View style={styles.pill}>
-                <Ionicons name="image-outline" size={14} color="#34C759" />
-                <Text style={styles.pillText}>{photoCount} Photo{photoCount > 1 ? 's' : ''}</Text>
-                <Ionicons name="checkmark" size={14} color="#34C759" />
-              </View>
-            )}
-          </View>
-        )}
       </ScrollView>
 
-      {/* Entry editor sheet */}
+      {/* Entry editor sheet - Updated with better snap points */}
       <EntryEditor
         ref={editorSheetRef}
         entryData={entryData}
@@ -428,22 +419,42 @@ const styles = StyleSheet.create({
 
   dateHeader: { alignItems: 'center', marginTop: theme.spacing.xl, marginBottom: theme.spacing.lg },
   dateHeaderTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
-  dateText: { ...theme.typography.body, color: theme.colors.text, marginBottom: theme.spacing.xs, textAlign: 'center', flex: 1 },
+  
+  // Enhanced date background styling
+  dateBackground: {
+    backgroundColor: '#6366F1', // Purple background
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.radius.lg,
+    shadowColor: '#6366F1',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  
+  dateText: { 
+    ...theme.typography.body, 
+    color: '#FFFFFF', // White text on purple background
+    fontWeight: '600',
+    textAlign: 'center', 
+    flex: 1 
+  },
 
   promptText: {
     ...theme.typography.body,
     color: theme.colors.textSecondary,
     textAlign: 'center',
-    marginTop: theme.spacing.sm,   // ↓ was lg
-    marginBottom: theme.spacing.md // gives a little breathing room before the actions row
+    marginTop: theme.spacing.sm,
+    marginBottom: theme.spacing.md
   },
 
   // tighter actions row
   actions: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: theme.spacing.xl, // was xxxl
-    marginTop: theme.spacing.lg, // was xl
+    gap: theme.spacing.xl,
+    marginTop: theme.spacing.lg,
   },
   action: { alignItems: 'center', padding: theme.spacing.sm },
   actionLabel: { ...theme.typography.caption, color: theme.colors.textSecondary, marginTop: 4 },
@@ -462,16 +473,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 16,
-    backgroundColor: '#eef9f0', // very light green
+    backgroundColor: '#eef9f0',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#cdeed2',
   },
   pillText: { ...theme.typography.caption, color: '#2e7d32', fontWeight: '600' },
+  
   tipsCard: {
     marginTop: theme.spacing.xl,
     marginBottom: theme.spacing.xl,
     padding: theme.spacing.lg,
-    backgroundColor: '#FFF',                    // crisp card
+    backgroundColor: '#FFF',
     borderRadius: theme.radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
