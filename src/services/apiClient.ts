@@ -28,7 +28,7 @@ export const EdgeApi = {
     fnName: string,
     options: {
       method?: 'GET' | 'POST';
-      body?: any;                 // we’ll stringify if not FormData
+      body?: any;                 // we'll stringify if not FormData
       headers?: Record<string, string>;
       formData?: FormData | null; // pass when uploading files
       withAuth?: boolean;         // send supabase session JWT
@@ -77,7 +77,7 @@ export const EdgeApi = {
           ...(formData ? {} : { 'Content-Type': 'application/json' }),
           ...headers,
         },
-        // React Native’s fetch typing is stricter—cast here to avoid BodyInit type noise
+        // React Native's fetch typing is stricter—cast here to avoid BodyInit type noise
         body: (formData ?? (body ? JSON.stringify(body) : null)) as any,
         signal: controller.signal as any,
       });
@@ -134,6 +134,45 @@ export const EdgeApi = {
     );
   },
 
+  // NEW: Period analysis method
+  async analyzePeriod(input: {
+    entries: Array<{
+      content: string;
+      mood?: number;
+      title?: string;
+      createdAt: string;
+      location?: string;
+      tags?: string[];
+    }>;
+    periodType: 'day' | 'week' | 'month' | 'custom';
+    startDate: string;
+    endDate: string;
+  }) {
+    return this.call<{
+      title: string;
+      summary: string;
+      emotions: string[];
+      themes: string[];
+      people: string[];
+      places: string[];
+      activities: string[];
+      mood_trend: 'improving' | 'declining' | 'stable' | 'mixed';
+      insights: string[];
+      highlights: string[];
+      challenges: string[];
+      overall_sentiment: 'very_positive' | 'positive' | 'neutral' | 'negative' | 'very_negative';
+      entry_count: number;
+      period_type: 'day' | 'week' | 'month' | 'custom';
+      start_date: string;
+      end_date: string;
+      average_mood: number | null;
+    }>('period-analyze', {
+      method: 'POST',
+      body: input,
+      withAuth: false
+    });
+  },
+
   async log(payload: { events: any[] }) {
     return this.call<{ ok: boolean }>('client-log', {
       method: 'POST',
@@ -143,5 +182,3 @@ export const EdgeApi = {
     });
   }
 };
-
-

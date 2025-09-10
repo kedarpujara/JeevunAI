@@ -14,7 +14,7 @@ export const AboutScreen: React.FC = () => {
           <View style={styles.appIcon}>
             <Ionicons name="journal" size={48} color="#007AFF" />
           </View>
-          <Text style={styles.appName}>Jeevun</Text>
+          <Text style={styles.appName}>Quill</Text>
           <Text style={styles.appVersion}>Version 1.0.0</Text>
           <Text style={styles.appTagline}>
             Your AI-powered voice journaling companion
@@ -37,13 +37,13 @@ export const AboutScreen: React.FC = () => {
 
           <TouchableOpacity style={styles.row}>
             <Ionicons name="star-outline" size={20} color="#666" />
-            <Text style={styles.rowTitle}>Rate Jeevun</Text>
+            <Text style={styles.rowTitle}>Rate Quill</Text>
             <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.row}>
             <Ionicons name="share-outline" size={20} color="#666" />
-            <Text style={styles.rowTitle}>Share Jeevun</Text>
+            <Text style={styles.rowTitle}>Share Quill</Text>
             <Ionicons name="chevron-forward" size={20} color="#C7C7CC" />
           </TouchableOpacity>
         </View>
@@ -73,8 +73,8 @@ export const AboutScreen: React.FC = () => {
 
         {/* Credits */}
         <View style={styles.credits}>
-          <Text style={styles.creditsText}>Made with ❤️ in San Francisco</Text>
-          <Text style={styles.copyright}>© 2025 Jeevun. All rights reserved.</Text>
+          <Text style={styles.creditsText}>Made with ❤️ in NYC</Text>
+          <Text style={styles.copyright}>© 2025 Quill. All rights reserved.</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

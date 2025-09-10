@@ -26,7 +26,7 @@ export const PrivacyScreen: React.FC = () => {
 
         <Text style={styles.sectionTitle}>3. How We Use Data</Text>
         <Text style={styles.paragraph}>
-          We use data only to provide and improve Jeevun. We never sell your data or use journal
+          We use data only to provide and improve Quill. We never sell your data or use journal
           content for advertising.
         </Text>
 
@@ -45,7 +45,7 @@ export const PrivacyScreen: React.FC = () => {
 
         <Text style={styles.sectionTitle}>6. Children’s Privacy</Text>
         <Text style={styles.paragraph}>
-          Jeevun is not intended for children under 13.
+          Quill is not intended for children under 13.
         </Text>
 
         <Text style={styles.sectionTitle}>7. Updates</Text>
@@ -55,7 +55,7 @@ export const PrivacyScreen: React.FC = () => {
 
         <Text style={styles.sectionTitle}>8. Contact</Text>
         <Text style={styles.paragraph}>
-          Questions? Contact us at privacy@jeevun.ai
+          Questions? Contact us at privacy@quill.ai
         </Text>
       </ScrollView>
     </SafeAreaView>

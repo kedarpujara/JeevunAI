@@ -1,4 +1,4 @@
-# 🎙️ Jeevun - Voice-First Journaling App
+# 🎙️ Quill - Voice-First Journaling App
 
 A beautiful, privacy-first journaling app that makes capturing your thoughts effortless through voice recording, AI analysis, and rich media attachments.
 
@@ -260,4 +260,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
     <a href="#-development">Development</a> •
     <a href="#-roadmap">Roadmap</a>
   </p>
-</div># JeevunAI
+</div># Quill.AI

@@ -21,7 +21,7 @@ function AuthenticatedDrawer() {
     if (!isReady) return;
     const inAuthGroup = segments[0] === 'auth';
     if (!user && !inAuthGroup) {
-      router.replace('/auth/login');
+      router.replace('/auth/authentication');
     }
   }, [user, isReady, segments]);
 
@@ -50,8 +50,9 @@ function AuthenticatedDrawer() {
       <Drawer.Screen name="(tabs)" options={{ headerShown: false, drawerItemStyle: { display: 'none' } }} />
 
       {/* Auth screens - hidden from drawer */}
-      <Drawer.Screen name="auth/login" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
-      <Drawer.Screen name="auth/signup" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
+      {/* <Drawer.Screen name="auth/login" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
+      <Drawer.Screen name="auth/signup" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} /> */}
+      <Drawer.Screen name="auth/authentication" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
 
       {/* Settings screens (route names must match files) */}
       <Drawer.Screen name="settings/general" options={{ title: 'General', headerShown: true, drawerItemStyle: { display: 'none' } }} />
@@ -63,7 +64,7 @@ function AuthenticatedDrawer() {
       <Drawer.Screen name="settings/subscriptions" options={{title: 'Subscription', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/backup" options={{title: 'Backup', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/export" options={{title: 'Export', headerShown: true, drawerItemStyle: { display: 'none' } }} />
-      <Drawer.Screen name="settings/about" options={{title: 'About Jeevun', headerShown: true, drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="settings/about" options={{title: 'About Quill', headerShown: true, drawerItemStyle: { display: 'none' } }} />
 
       {/* Entry detail (matches app/entry/[id].tsx) */}
       <Drawer.Screen name="entry/[id]" options={{ title: 'Entry Details', headerShown: false, drawerItemStyle: { display: 'none' } }} />

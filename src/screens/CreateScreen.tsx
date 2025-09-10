@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   
   // Enhanced date background styling
   dateBackground: {
-    backgroundColor: '#6366F1', // Purple background
+    // backgroundColor: '#6366F1', // Purple background
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     borderRadius: theme.radius.lg,
@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   
   dateText: { 
     ...theme.typography.body, 
-    color: '#FFFFFF', // White text on purple background
+    color: theme.colors.black, // White text on purple background
     fontWeight: '600',
     textAlign: 'center', 
     flex: 1 
@@ -480,8 +480,8 @@ const styles = StyleSheet.create({
   pillText: { ...theme.typography.caption, color: '#2e7d32', fontWeight: '600' },
   
   tipsCard: {
-    marginTop: theme.spacing.xl,
-    marginBottom: theme.spacing.xl,
+    marginTop: theme.spacing.xxxxl,
+    marginBottom: theme.spacing.xxxxl,
     padding: theme.spacing.lg,
     backgroundColor: '#FFF',
     borderRadius: theme.radius.lg,

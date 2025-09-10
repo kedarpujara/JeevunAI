@@ -169,7 +169,7 @@ export const DrawerContent: React.FC<any> = (props) => {
       if (__DEV__) console.warn('signOut error:', e);
     } finally {
       props.navigation?.closeDrawer?.();
-      router.replace('/auth/login');
+      router.replace('/auth/authentication');
     }
   };
 
@@ -235,7 +235,7 @@ export const DrawerContent: React.FC<any> = (props) => {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Jeevun v1.0.0</Text>
+          <Text style={styles.footerText}>Quill v1.0.0</Text>
           <TouchableOpacity onPress={() => handleItemPress('/settings/privacy')}>
             <Text style={styles.footerLink}>Privacy Policy</Text>
           </TouchableOpacity>

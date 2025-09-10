@@ -16,7 +16,7 @@ export const HelpScreen: React.FC = () => {
       answer: 'Yes! All data is encrypted and stored locally by default. Cloud sync uses end-to-end encryption.',
     },
     {
-      question: 'Can I use Jeevun offline?',
+      question: 'Can I use Quill offline?',
       answer: 'Absolutely! All core features work offline. AI features require internet connection.',
     },
   ];

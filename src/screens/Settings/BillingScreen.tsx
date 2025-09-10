@@ -4,6 +4,7 @@ import {
     ScrollView, StyleSheet, Text, TouchableOpacity, View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { theme } from '@/constants/theme';
 
 export const BillingScreen: React.FC = () => {
   return (
@@ -14,7 +15,7 @@ export const BillingScreen: React.FC = () => {
           <View style={styles.planBadge}>
             <Text style={styles.planBadgeText}>FREE PLAN</Text>
           </View>
-          <Text style={styles.planTitle}>Jeevun Basic</Text>
+          <Text style={styles.planTitle}>Quill Basic</Text>
           <Text style={styles.planDescription}>
             Unlimited journal entries with AI-powered insights
           </Text>
@@ -124,8 +125,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   upgradeCard: {
-    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    backgroundColor: '#007AFF',
+    backgroundColor: theme.colors.primary,  
     margin: 16,
     padding: 20,
     borderRadius: 12,
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
   proBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#007AFF',
+    color: theme.colors.primary,
   },
   upgradeTitle: {
     fontSize: 24,
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
   upgradeButtonText: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#007AFF',
+    color: theme.colors.primary,
   },
   section: {
     backgroundColor: '#FFF',
@@ -190,6 +190,6 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     fontSize: 16,
-    color: '#007AFF',
+    color: theme.colors.primary,
   },
 });

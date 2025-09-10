@@ -1,53 +1,45 @@
-// app/history.tsx - V2 improvements
+// app/history.tsx - Simplified Timeline Only
 
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Card from '../components/Card';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Image, Modal } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import EmptyState from '../components/EmptyState';
-import EntryListItem from '../components/EntryListItem';
-import SegmentedControl from '../components/SegmentedControl';
 import { theme } from '../constants/theme';
 import { useJournal } from '../context/JournalContext';
 import { entriesService } from '../services/entries';
-import { Entry, GroupedEntries, ViewMode } from '../types/journal';
+import { Entry, GroupedEntries } from '../types/journal';
 import { formatDisplayDate } from '../utils/format';
 
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import EntryDetailSheet, { EntryDetailSheetRef } from '../components/EntryDetailSheet';
+import TimelineItem from '../components/TimelineItem';
 
-// New interfaces for V2
-interface DailySummary {
-  date: string;
-  entries: Entry[];
-  summary?: string;
-  keyMoments: string[];
-  avgMood: number;
-  tags: string[];
-}
+type TimelineFilter = 'week' | 'month' | 'all';
+type SortOrder = 'latest' | 'earliest';
 
-interface WeeklySummary {
-  weekStart: string;
-  entries: Entry[];
-  summary?: string;
-  people: string[];
-  activities: string[];
-  highlights: string[];
-  lowlights: string[];
-  avgMood: number;
-  topTags: string[];
-}
+const STORAGE_KEYS = {
+  TIMELINE_FILTER: 'timeline_filter',
+  SORT_ORDER: 'sort_order',
+};
 
 export default function HistoryScreen() {
   const router = useRouter();
   const { entries, refreshEntries, deleteEntry } = useJournal();
 
-  const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [groupedEntries, setGroupedEntries] = useState<GroupedEntries>({});
-  const [dailySummaries, setDailySummaries] = useState<DailySummary[]>([]);
-  const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  
+  // Timeline filters
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
+  
+  // Filter selectors
+  const [showWeekSelector, setShowWeekSelector] = useState(false);
+  const [showMonthSelector, setShowMonthSelector] = useState(false);
+  const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // bottom sheet
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
@@ -61,200 +53,40 @@ export default function HistoryScreen() {
   const closeDetails = useCallback(() => sheetRef.current?.dismiss?.(), []);
 
   const parseYMD = (ymd: string) => {
-    // ymd = 'YYYY-MM-DD'
-    const [y, m, d] = ymd.split('-').map(n => parseInt(n, 10));
-    // Create a date in local timezone at noon to avoid DST issues
-    return new Date(y, m - 1, d, 12, 0, 0); 
+    // ymd = 'YYYY-MM-DD' - ensure we use the exact date without timezone shifts
+    return new Date(ymd + 'T00:00:00.000'); // Force local midnight
   };
 
+  // Load saved preferences
   useEffect(() => {
-    loadGroupedEntries();
-  }, [entries, viewMode]);
+    loadSavedPreferences();
+  }, []);
+
+  const loadSavedPreferences = async () => {
+    try {
+      const savedFilter = await AsyncStorage.getItem(STORAGE_KEYS.TIMELINE_FILTER);
+      const savedSort = await AsyncStorage.getItem(STORAGE_KEYS.SORT_ORDER);
+      
+      if (savedFilter) setTimelineFilter(savedFilter as TimelineFilter);
+      if (savedSort) setSortOrder(savedSort as SortOrder);
+    } catch (error) {
+      console.log('Error loading preferences:', error);
+    }
+  };
+
+  const savePreference = async (key: string, value: string) => {
+    try {
+      await AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.log('Error saving preference:', error);
+    }
+  };
+
+  useEffect(() => { loadGroupedEntries(); }, [entries, timelineFilter]);
 
   const loadGroupedEntries = async () => {
-    let grouped: GroupedEntries = {};
-    switch (viewMode) {
-      case 'day':
-        grouped = await entriesService.groupEntriesByDay();
-        await loadDailySummaries(grouped);
-        break;
-      case 'week':
-        grouped = await entriesService.groupEntriesByWeek();
-        await loadWeeklySummaries(grouped);
-        break;
-      case 'month':
-        grouped = await entriesService.groupEntriesByMonth();
-        break;
-    }
+    const grouped = await entriesService.groupEntriesByDay();
     setGroupedEntries(grouped);
-  };
-
-  // Generate daily summaries for improved day view
-  const loadDailySummaries = async (grouped: GroupedEntries) => {
-    const summaries: DailySummary[] = [];
-    
-    for (const [date, dayEntries] of Object.entries(grouped)) {
-      if (dayEntries.length === 0) continue;
-
-      const avgMood = dayEntries.reduce((sum, e) => sum + (e.mood || 3), 0) / dayEntries.length;
-      const allTags = dayEntries.flatMap(e => e.tags?.map(t => t.name) || []);
-      const uniqueTags = [...new Set(allTags)];
-      
-      // Simple key moments extraction (could be enhanced with AI)
-      const keyMoments = dayEntries
-        .filter(e => e.body.length > 50) // Only substantial entries
-        .map(e => e.title)
-        .slice(0, 3);
-
-      // Generate a simple summary (could be enhanced with AI)
-      const summary = generateDailySummary(dayEntries);
-
-      summaries.push({
-        date,
-        entries: dayEntries,
-        summary,
-        keyMoments,
-        avgMood,
-        tags: uniqueTags
-      });
-    }
-
-    // Sort by date, newest first
-    summaries.sort((a, b) => b.date.localeCompare(a.date));
-    setDailySummaries(summaries);
-  };
-
-  // Generate weekly summaries for improved week view
-  const loadWeeklySummaries = async (grouped: GroupedEntries) => {
-    const weeklySummariesMap = new Map<string, WeeklySummary>();
-
-    // Group entries by week
-    for (const [date, dayEntries] of Object.entries(grouped)) {
-      const entryDate = parseYMD(date);
-      const weekStart = getWeekStart(entryDate);
-      const weekKey = weekStart.toISOString().split('T')[0];
-
-      if (!weeklySummariesMap.has(weekKey)) {
-        weeklySummariesMap.set(weekKey, {
-          weekStart: weekKey,
-          entries: [],
-          people: [],
-          activities: [],
-          highlights: [],
-          lowlights: [],
-          avgMood: 0,
-          topTags: []
-        });
-      }
-
-      const weekSummary = weeklySummariesMap.get(weekKey)!;
-      weekSummary.entries.push(...dayEntries);
-    }
-
-    // Process each week's data
-    const summaries: WeeklySummary[] = [];
-    for (const weekSummary of weeklySummariesMap.values()) {
-      if (weekSummary.entries.length === 0) continue;
-
-      // Calculate average mood
-      weekSummary.avgMood = weekSummary.entries.reduce((sum, e) => sum + (e.mood || 3), 0) / weekSummary.entries.length;
-
-      // Extract top tags
-      const tagCounts = new Map<string, number>();
-      weekSummary.entries.forEach(e => {
-        e.tags?.forEach(t => {
-          tagCounts.set(t.name, (tagCounts.get(t.name) || 0) + 1);
-        });
-      });
-      weekSummary.topTags = Array.from(tagCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([tag]) => tag);
-
-      // Generate AI-enhanced summary (simplified for now)
-      weekSummary.summary = generateWeeklySummary(weekSummary.entries);
-      weekSummary.people = extractPeople(weekSummary.entries);
-      weekSummary.activities = extractActivities(weekSummary.entries);
-      weekSummary.highlights = extractHighlights(weekSummary.entries);
-      weekSummary.lowlights = extractLowlights(weekSummary.entries);
-
-      summaries.push(weekSummary);
-    }
-
-    // Sort by week start, newest first
-    summaries.sort((a, b) => b.weekStart.localeCompare(a.weekStart));
-    setWeeklySummaries(summaries);
-  };
-
-  // Helper functions for summary generation
-  const getWeekStart = (date: Date): Date => {
-    const result = new Date(date);
-    const day = result.getDay();
-    result.setDate(result.getDate() - day);
-    return result;
-  };
-
-  const generateDailySummary = (entries: Entry[]): string => {
-    if (entries.length === 1) {
-      return entries[0].body.substring(0, 100) + (entries[0].body.length > 100 ? '...' : '');
-    }
-    return `${entries.length} entries covering various moments throughout the day.`;
-  };
-
-  const generateWeeklySummary = (entries: Entry[]): string => {
-    const themes = entries.flatMap(e => e.themes || []);
-    const uniqueThemes = [...new Set(themes)].slice(0, 3);
-    
-    if (uniqueThemes.length > 0) {
-      return `A week focused on ${uniqueThemes.join(', ')} with ${entries.length} journal entries.`;
-    }
-    return `A week with ${entries.length} journal entries covering various experiences.`;
-  };
-
-  const extractPeople = (entries: Entry[]): string[] => {
-    // Simple extraction - look for common name patterns
-    const people = new Set<string>();
-    entries.forEach(entry => {
-      const words = entry.body.split(/\s+/);
-      words.forEach(word => {
-        // Look for capitalized words that might be names (simplified)
-        if (/^[A-Z][a-z]+$/.test(word) && word.length > 2) {
-          people.add(word);
-        }
-      });
-    });
-    return Array.from(people).slice(0, 5);
-  };
-
-  const extractActivities = (entries: Entry[]): string[] => {
-    const activities = new Set<string>();
-    entries.forEach(entry => {
-      // Look for activity-related keywords in tags and content
-      entry.tags?.forEach(tag => {
-        if (['work', 'exercise', 'travel', 'social', 'hobby'].includes(tag.name.toLowerCase())) {
-          activities.add(tag.name);
-        }
-      });
-    });
-    return Array.from(activities).slice(0, 5);
-  };
-
-  const extractHighlights = (entries: Entry[]): string[] => {
-    // Look for positive sentiment entries or high mood scores
-    const highlights = entries
-      .filter(e => (e.mood && e.mood >= 4) || (e.sentiment && e.sentiment > 0.3))
-      .map(e => e.title)
-      .slice(0, 3);
-    return highlights;
-  };
-
-  const extractLowlights = (entries: Entry[]): string[] => {
-    // Look for negative sentiment entries or low mood scores
-    const lowlights = entries
-      .filter(e => (e.mood && e.mood <= 2) || (e.sentiment && e.sentiment < -0.3))
-      .map(e => e.title)
-      .slice(0, 3);
-    return lowlights;
   };
 
   const handleRefresh = useCallback(async () => {
@@ -284,803 +116,702 @@ export default function HistoryScreen() {
     ]);
   };
 
-  const toggleDayExpansion = (date: string) => {
-    setExpandedDay(expandedDay === date ? null : date);
+  // Filter entries by time period
+  const getFilteredEntries = () => {
+    const now = new Date();
+    
+    switch (timelineFilter) {
+      case 'week':
+        if (selectedWeek) {
+          // Filter by specific week
+          const weekStart = new Date(selectedWeek);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekStart.getDate() + 6);
+          
+          const filtered: GroupedEntries = {};
+          Object.entries(groupedEntries).forEach(([date, dayEntries]) => {
+            const entryDate = parseYMD(date);
+            if (entryDate >= weekStart && entryDate <= weekEnd) {
+              filtered[date] = dayEntries;
+            }
+          });
+          return filtered;
+        } else {
+          // Default to last 7 days
+          const cutoffDate = new Date();
+          cutoffDate.setDate(now.getDate() - 7);
+          
+          const filtered: GroupedEntries = {};
+          Object.entries(groupedEntries).forEach(([date, dayEntries]) => {
+            const entryDate = parseYMD(date);
+            if (entryDate >= cutoffDate) {
+              filtered[date] = dayEntries;
+            }
+          });
+          return filtered;
+        }
+      case 'month':
+        if (selectedMonth) {
+          // Filter by specific month
+          const [year, month] = selectedMonth.split('-').map(n => parseInt(n, 10));
+          
+          const filtered: GroupedEntries = {};
+          Object.entries(groupedEntries).forEach(([date, dayEntries]) => {
+            const entryDate = parseYMD(date);
+            if (entryDate.getFullYear() === year && entryDate.getMonth() === month - 1) {
+              filtered[date] = dayEntries;
+            }
+          });
+          return filtered;
+        } else {
+          // Default to last 30 days
+          const cutoffDate = new Date();
+          cutoffDate.setMonth(now.getMonth() - 1);
+          
+          const filtered: GroupedEntries = {};
+          Object.entries(groupedEntries).forEach(([date, dayEntries]) => {
+            const entryDate = parseYMD(date);
+            if (entryDate >= cutoffDate) {
+              filtered[date] = dayEntries;
+            }
+          });
+          return filtered;
+        }
+      case 'all':
+      default:
+        return groupedEntries;
+    }
   };
 
-  // V2 Day View - Single preview per day with expansion
-  const renderDayView = () => {
-    if (dailySummaries.length === 0) {
-      return (
+  // Get available weeks for selector
+  const getAvailableWeeks = () => {
+    const weeks: Array<{ label: string; value: string }> = [];
+    const dates = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
+    
+    const weekMap = new Map<string, Date>();
+    
+    dates.forEach(date => {
+      const entryDate = parseYMD(date);
+      const weekStart = new Date(entryDate);
+      weekStart.setDate(entryDate.getDate() - entryDate.getDay()); // Start of week (Sunday)
+      
+      const weekKey = weekStart.toISOString().split('T')[0];
+      if (!weekMap.has(weekKey)) {
+        weekMap.set(weekKey, weekStart);
+      }
+    });
+    
+    Array.from(weekMap.entries())
+      .sort((a, b) => b[1].getTime() - a[1].getTime())
+      .slice(0, 8) // Limit to last 8 weeks
+      .forEach(([weekKey, weekStart]) => {
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const label = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        weeks.push({ label, value: weekKey });
+      });
+    
+    return weeks;
+  };
+
+  // Get available months for selector
+  const getAvailableMonths = () => {
+    const months: Array<{ label: string; value: string }> = [];
+    const dates = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
+    
+    const monthMap = new Set<string>();
+    
+    dates.forEach(date => {
+      const entryDate = parseYMD(date);
+      const monthKey = `${entryDate.getFullYear()}-${String(entryDate.getMonth() + 1).padStart(2, '0')}`;
+      monthMap.add(monthKey);
+    });
+    
+    Array.from(monthMap)
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 12) // Limit to last 12 months
+      .forEach(monthKey => {
+        const [year, month] = monthKey.split('-').map(n => parseInt(n, 10));
+        const date = new Date(year, month - 1);
+        const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        months.push({ label, value: monthKey });
+      });
+    
+    return months;
+  };
+
+  // Generate a title for a day's entries
+  const generateDayTitle = (dayEntries: Entry[]): string => {
+    if (dayEntries.length === 1) {
+      return dayEntries[0].title || 'Daily Entry';
+    }
+    
+    const moods = dayEntries.filter(e => e.mood).map(e => e.mood!);
+    const avgMood = moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : 3;
+    
+    if (avgMood >= 4) return `Great Day - ${dayEntries.length} moments`;
+    if (avgMood >= 3) return `Good Day - ${dayEntries.length} entries`;
+    if (avgMood >= 2) return `Mixed Day - ${dayEntries.length} thoughts`;
+    return `Challenging Day - ${dayEntries.length} reflections`;
+  };
+
+  const getDayPreview = (dayEntries: Entry[]): string => {
+    if (dayEntries.length === 1) {
+      return dayEntries[0].body?.substring(0, 120) + '...' || 'No content available';
+    }
+    
+    const hasContent = dayEntries.filter(e => e.body).slice(0, 2);
+    if (hasContent.length === 0) return 'Multiple entries captured for this day';
+    
+    return hasContent.map(e => e.body?.substring(0, 60)).join(' • ') + '...';
+  };
+
+  const getDayFirstPhoto = (dayEntries: Entry[]): string | null => {
+    for (const entry of dayEntries) {
+      if (entry.photoUris && entry.photoUris.length > 0) {
+        return entry.photoUris[0];
+      }
+    }
+    return null;
+  };
+
+  const handleTimelineDayPress = (date: string, dayEntries: Entry[]) => {
+    router.push({
+      pathname: '/day-detail',
+      params: { date, entriesData: JSON.stringify(dayEntries) }
+    });
+  };
+
+  const handleTimelineFilterChange = (filter: TimelineFilter) => {
+    setTimelineFilter(filter);
+    savePreference(STORAGE_KEYS.TIMELINE_FILTER, filter);
+    
+    // Show selector for week/month
+    if (filter === 'week') {
+      setShowWeekSelector(true);
+    } else if (filter === 'month') {
+      setShowMonthSelector(true);
+    } else {
+      // Reset selections for 'all'
+      setSelectedWeek(null);
+      setSelectedMonth(null);
+    }
+  };
+
+  const handleSortOrderChange = () => {
+    const newOrder = sortOrder === 'latest' ? 'earliest' : 'latest';
+    setSortOrder(newOrder);
+    savePreference(STORAGE_KEYS.SORT_ORDER, newOrder);
+  };
+
+  const handleWeekSelect = (weekValue: string) => {
+    setSelectedWeek(weekValue);
+    setShowWeekSelector(false);
+  };
+
+  const handleMonthSelect = (monthValue: string) => {
+    setSelectedMonth(monthValue);
+    setShowMonthSelector(false);
+  };
+
+  const filteredEntries = getFilteredEntries();
+  const days = Object.keys(filteredEntries).sort((a, b) => 
+    sortOrder === 'latest' ? b.localeCompare(a) : a.localeCompare(b)
+  );
+  
+  if (days.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Timeline</Text>
+          <Text style={styles.headerSubtitle}>Your journal entries in chronological order</Text>
+        </View>
         <EmptyState
           icon="book-outline"
           title="No entries yet"
-          message="Start journaling to see your thoughts here"
+          message="Start journaling to see your timeline"
           actionLabel="Create Entry"
           onAction={() => router.push('/')}
         />
-      );
-    }
-
-    return (
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary} />
-        }
-      >
-        {dailySummaries.map((day) => (
-          <Card key={day.date} style={styles.dayCard}>
-            <TouchableOpacity onPress={() => toggleDayExpansion(day.date)}>
-              <View style={styles.dayHeader}>
-                <Text style={styles.dayTitle}>{formatDisplayDate(day.date)}</Text>
-                <View style={styles.dayMeta}>
-                  <Text style={styles.dayStats}>
-                    {day.entries.length} {day.entries.length === 1 ? 'entry' : 'entries'} • Mood {day.avgMood.toFixed(1)}
-                  </Text>
-                </View>
-              </View>
-              
-              {day.summary && (
-                <Text style={styles.daySummary} numberOfLines={expandedDay === day.date ? undefined : 2}>
-                  {day.summary}
-                </Text>
-              )}
-
-              {day.keyMoments.length > 0 && (
-                <View style={styles.keyMoments}>
-                  {day.keyMoments.map((moment, idx) => (
-                    <Text key={idx} style={styles.keyMoment}>• {moment}</Text>
-                  ))}
-                </View>
-              )}
-
-              {day.tags.length > 0 && (
-                <View style={styles.tagRow}>
-                  {day.tags.slice(0, 3).map((tag, idx) => (
-                    <View key={idx} style={styles.tag}>
-                      <Text style={styles.tagText}>#{tag}</Text>
-                    </View>
-                  ))}
-                  {day.tags.length > 3 && (
-                    <Text style={styles.moreTagsText}>+{day.tags.length - 3} more</Text>
-                  )}
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Expanded entries list */}
-            {expandedDay === day.date && (
-              <View style={styles.expandedEntries}>
-                <View style={styles.entriesDivider} />
-                {day.entries.map((entry) => (
-                  <EntryListItem
-                    key={entry.id}
-                    entry={entry}
-                    onPress={() => handleEntryPress(entry)}
-                    onDelete={() => handleEntryDelete(entry)}
-                    style={styles.expandedEntry}
-                  />
-                ))}
-              </View>
-            )}
-          </Card>
-        ))}
-      </ScrollView>
+      </View>
     );
-  };
-
-  // V2 Week View - Enhanced with comprehensive summaries
-  const renderWeekView = () => {
-    if (weeklySummaries.length === 0) {
-      return <EmptyState icon="calendar-outline" title="No weekly data" message="Create entries to see weekly summaries" />;
-    }
-
-    return (
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary} />}
-      >
-        {weeklySummaries.map((week) => (
-          <Card key={week.weekStart} style={styles.weekCard}>
-            <Text style={styles.weekTitle}>Week of {formatDisplayDate(week.weekStart)}</Text>
-            
-            {/* Basic stats */}
-            <View style={styles.weekStats}>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>{week.entries.length}</Text>
-                <Text style={styles.statLabel}>Entries</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statValue}>{week.avgMood.toFixed(1)}</Text>
-                <Text style={styles.statLabel}>Avg Mood</Text>
-              </View>
-              {week.topTags[0] && (
-                <View style={styles.stat}>
-                  <Text style={styles.statValue}>#{week.topTags[0]}</Text>
-                  <Text style={styles.statLabel}>Top Tag</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Weekly summary */}
-            {week.summary && (
-              <View style={styles.summarySection}>
-                <Text style={styles.sectionTitle}>Summary</Text>
-                <Text style={styles.summaryText}>{week.summary}</Text>
-              </View>
-            )}
-
-            {/* People */}
-            {week.people.length > 0 && (
-              <View style={styles.summarySection}>
-                <Text style={styles.sectionTitle}>People</Text>
-                <Text style={styles.summaryText}>{week.people.join(', ')}</Text>
-              </View>
-            )}
-
-            {/* Activities */}
-            {week.activities.length > 0 && (
-              <View style={styles.summarySection}>
-                <Text style={styles.sectionTitle}>Activities</Text>
-                <Text style={styles.summaryText}>{week.activities.join(', ')}</Text>
-              </View>
-            )}
-
-            {/* Highlights */}
-            {week.highlights.length > 0 && (
-              <View style={styles.summarySection}>
-                <Text style={styles.sectionTitle}>Highlights</Text>
-                {week.highlights.map((highlight, idx) => (
-                  <Text key={idx} style={styles.highlightText}>• {highlight}</Text>
-                ))}
-              </View>
-            )}
-
-            {/* Lowlights */}
-            {week.lowlights.length > 0 && (
-              <View style={styles.summarySection}>
-                <Text style={styles.sectionTitle}>Challenges</Text>
-                {week.lowlights.map((lowlight, idx) => (
-                  <Text key={idx} style={styles.lowlightText}>• {lowlight}</Text>
-                ))}
-              </View>
-            )}
-          </Card>
-        ))}
-      </ScrollView>
-    );
-  };
-
-  const renderMonthView = () => {
-    // Keep existing month view implementation for now
-    const monthMap = new Map<string, Entry[]>();
-
-    Object.entries(groupedEntries).forEach(([key, list]) => {
-      const d = parseYMD(key);
-      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const prev = monthMap.get(monthKey) ?? [];
-      monthMap.set(monthKey, prev.concat(list));
-    });
-
-    const months = Array.from(monthMap.keys()).sort((a, b) => b.localeCompare(a));
-
-    if (months.length === 0) {
-      return (
-        <EmptyState
-          icon="calendar-outline"
-          title="No monthly data"
-          message="Create entries to see monthly summaries"
-        />
-      );
-    }
-
-    return (
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={theme.colors.primary}
-          />
-        }
-      >
-        {months.map((monthKey) => {
-          const monthEntries = monthMap.get(monthKey)!;
-          const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
-          const monthStartDate = new Date(y, m - 1, 1);
-          const monthName = monthStartDate.toLocaleDateString('en-US', {
-            month: 'long',
-            year: 'numeric',
-          });
-
-          const daysInMonth = new Date(y, m, 0).getDate();
-          const firstDay = new Date(y, m - 1, 1).getDay();
-
-          const entriesByDay = new Map<number, Entry[]>();
-          monthEntries.forEach((e) => {
-            const ed = parseYMD(e.date);
-            if (ed.getFullYear() !== y || ed.getMonth() !== m - 1) return;
-            const dd = ed.getDate();
-            const arr = entriesByDay.get(dd) ?? [];
-            arr.push(e);
-            entriesByDay.set(dd, arr);
-          });
-
-          return (
-            <Card key={monthKey} style={styles.monthCard}>
-              <Text style={styles.monthTitle}>{monthName}</Text>
-
-              <View style={styles.calendarGrid}>
-                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-                  <Text key={i} style={styles.dayLabel}>
-                    {d}
-                  </Text>
-                ))}
-
-                {Array.from({ length: firstDay }).map((_, i) => (
-                  <View key={`empty-${i}`} style={styles.dayCell} />
-                ))}
-
-                {Array.from({ length: daysInMonth }).map((_, i) => {
-                  const day = i + 1;
-                  const dayEntries = entriesByDay.get(day) || [];
-                  const has = dayEntries.length > 0;
-
-                  return (
-                    <TouchableOpacity
-                      key={day}
-                      style={[styles.dayCell, has && styles.dayCellActive]}
-                      onPress={() => has && presentDetails(dayEntries[0])}
-                      activeOpacity={has ? 0.7 : 1}
-                    >
-                      <Text style={[styles.dayNumber, has && styles.dayNumberActive]}>{day}</Text>
-                      {has && (
-                        <View
-                          style={[
-                            styles.dayDot,
-                            { backgroundColor: theme.colors.primary },
-                          ]}
-                        />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <View style={styles.monthStats}>
-                <Text style={styles.monthStatText}>
-                  {monthEntries.length} entries this month
-                </Text>
-              </View>
-            </Card>
-          );
-        })}
-      </ScrollView>
-    );
-  };
+  }
 
   return (
     <BottomSheetModalProvider>
       <View style={styles.container}>
-        <SegmentedControl
-          options={['Day', 'Week', 'Month']}
-          selectedIndex={viewMode === 'day' ? 0 : viewMode === 'week' ? 1 : 2}
-          onChange={(i) => setViewMode(['day', 'week', 'month'][i] as ViewMode)}
-          style={styles.segmentedControl}
-          activeColor={theme.colors.primary}
-          activeBackground={theme.colors.surface}
-        />
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Timeline</Text>
+          <Text style={styles.headerSubtitle}>Your journal entries in chronological order</Text>
+        </View>
 
-        {viewMode === 'day' && renderDayView()}
-        {viewMode === 'week' && renderWeekView()}
-        {viewMode === 'month' && renderMonthView()}
+        {/* Filter Controls */}
+        <View style={styles.filtersContainer}>
+          <View style={styles.timeFilters}>
+            {(['week', 'month', 'all'] as TimelineFilter[]).map((filter) => (
+              <TouchableOpacity
+                key={filter}
+                style={[
+                  styles.filterButton,
+                  timelineFilter === filter && styles.filterButtonActive
+                ]}
+                onPress={() => handleTimelineFilterChange(filter)}
+              >
+                <Text style={[
+                  styles.filterButtonText,
+                  timelineFilter === filter && styles.filterButtonTextActive
+                ]}>
+                  {filter === 'all' ? 'All Time' : filter.charAt(0).toUpperCase() + filter.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={styles.sortButton}
+            onPress={handleSortOrderChange}
+          >
+            <Ionicons 
+              name="hourglass-outline" 
+              size={16} 
+              color={theme.colors.primary} 
+            />
+            <Text style={styles.sortButtonText}>
+              {sortOrder === 'latest' ? 'Latest First' : 'Earliest First'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Timeline */}
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={theme.colors.primary}
+            />
+          }
+          contentContainerStyle={styles.timelineScrollContent}
+        >
+          <View style={styles.timelineLine} />
+          
+          {days.map((date, index) => {
+            const dayEntries = filteredEntries[date];
+            const title = generateDayTitle(dayEntries);
+            const preview = getDayPreview(dayEntries);
+            const firstPhoto = getDayFirstPhoto(dayEntries);
+
+            return (
+              <View key={date} style={styles.timelineItem}>
+                <View style={styles.timelineDot} />
+                
+                <TouchableOpacity
+                  style={styles.timelineCard}
+                  onPress={() => handleTimelineDayPress(date, dayEntries)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.timelineHeader}>
+                    <View style={styles.dateContainer}>
+                      <Ionicons name="calendar-outline" size={16} color={theme.colors.textSecondary} />
+                      <Text style={styles.timelineDate}>{formatDisplayDate(date)}</Text>
+                    </View>
+                    {dayEntries[0].locationData && (
+                      <View style={styles.locationContainer}>
+                        <Ionicons name="location-outline" size={16} color={theme.colors.textSecondary} />
+                        <Text style={styles.locationText}>
+                          {dayEntries[0].locationData.place?.name || 
+                           dayEntries[0].locationData.address?.city || 
+                           'Location'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.timelineContent}>
+                    <View style={styles.timelineImageContainer}>
+                      {firstPhoto ? (
+                        <Image source={{ uri: firstPhoto }} style={styles.timelineImage} />
+                      ) : (
+                        <View style={styles.placeholderImage}>
+                          <Text style={styles.placeholderEmoji}>📝</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.timelineTextContent}>
+                      <Text style={styles.timelineTitle}>{title}</Text>
+                      <Text style={styles.timelinePreview}>{preview}</Text>
+                      
+                      {dayEntries.length > 1 && (
+                        <View style={styles.entryCountBadge}>
+                          <Text style={styles.entryCountText}>{dayEntries.length} entries</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {index < days.length - 1 && (
+                  <View style={styles.timelineArrow}>
+                    <Ionicons name="chevron-down" size={20} color={theme.colors.primary} />
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
 
         <EntryDetailSheet ref={sheetRef} entry={selectedEntry} onDismiss={() => setSelectedEntry(null)} />
+
+        {/* Week Selector Modal */}
+        <Modal
+          visible={showWeekSelector}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowWeekSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Week</Text>
+                <TouchableOpacity onPress={() => setShowWeekSelector(false)}>
+                  <Ionicons name="close" size={24} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalScroll}>
+                {getAvailableWeeks().map((week) => (
+                  <TouchableOpacity
+                    key={week.value}
+                    style={[
+                      styles.modalOption,
+                      selectedWeek === week.value && styles.modalOptionSelected
+                    ]}
+                    onPress={() => handleWeekSelect(week.value)}
+                  >
+                    <Text style={[
+                      styles.modalOptionText,
+                      selectedWeek === week.value && styles.modalOptionTextSelected
+                    ]}>
+                      {week.label}
+                    </Text>
+                    {selectedWeek === week.value && (
+                      <Ionicons name="checkmark" size={20} color={theme.colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Month Selector Modal */}
+        <Modal
+          visible={showMonthSelector}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowMonthSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Select Month</Text>
+                <TouchableOpacity onPress={() => setShowMonthSelector(false)}>
+                  <Ionicons name="close" size={24} color={theme.colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalScroll}>
+                {getAvailableMonths().map((month) => (
+                  <TouchableOpacity
+                    key={month.value}
+                    style={[
+                      styles.modalOption,
+                      selectedMonth === month.value && styles.modalOptionSelected
+                    ]}
+                    onPress={() => handleMonthSelect(month.value)}
+                  >
+                    <Text style={[
+                      styles.modalOptionText,
+                      selectedMonth === month.value && styles.modalOptionTextSelected
+                    ]}>
+                      {month.label}
+                    </Text>
+                    {selectedMonth === month.value && (
+                      <Ionicons name="checkmark" size={20} color={theme.colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </View>
     </BottomSheetModalProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  segmentedControl: { marginHorizontal: theme.spacing.lg, marginVertical: theme.spacing.md },
-  scrollView: { flex: 1 },
-  listContent: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xl },
-
-  // V2 Day view styles
-  dayCard: { 
-    marginHorizontal: theme.spacing.lg, 
-    marginBottom: theme.spacing.md,
-    padding: theme.spacing.lg 
+  container: { 
+    flex: 1, 
+    backgroundColor: theme.colors.background 
   },
-  dayHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center',
-    marginBottom: theme.spacing.sm 
-  },
-  dayTitle: { 
-    ...theme.typography.h3, 
-    color: theme.colors.text,
-    fontWeight: '600' 
-  },
-  dayMeta: { alignItems: 'flex-end' },
-  dayStats: { 
-    ...theme.typography.caption, 
-    color: theme.colors.textSecondary 
-  },
-  daySummary: { 
-    ...theme.typography.body, 
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
-    lineHeight: 20 
-  },
-  keyMoments: { marginBottom: theme.spacing.sm },
-  keyMoment: { 
-    ...theme.typography.caption, 
-    color: theme.colors.text,
-    marginBottom: 2 
-  },
-  tagRow: { 
-    flexDirection: 'row', 
-    flexWrap: 'wrap', 
-    alignItems: 'center',
-    gap: theme.spacing.xs 
-  },
-  tag: {
+  header: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.xl,
+    paddingBottom: theme.spacing.lg,
     backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 2,
-    borderRadius: theme.radius.sm,
-  },
-  tagText: { 
-    ...theme.typography.caption, 
-    color: theme.colors.primary,
-    fontWeight: '500' 
-  },
-  moreTagsText: { 
-    ...theme.typography.caption, 
-    color: theme.colors.textSecondary,
-    fontStyle: 'italic' 
-  },
-  expandedEntries: { marginTop: theme.spacing.md },
-  entriesDivider: {
-    height: 1,
-    backgroundColor: theme.colors.border,
-    marginBottom: theme.spacing.md,
-  },
-  expandedEntry: { marginBottom: theme.spacing.sm },
-
-  // V2 Week view styles
-  weekCard: { 
-    marginHorizontal: theme.spacing.lg, 
-    marginBottom: theme.spacing.md,
-    padding: theme.spacing.lg 
-  },
-  weekTitle: { ...theme.typography.h2, marginBottom: theme.spacing.md },
-  weekStats: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    marginBottom: theme.spacing.lg,
-    paddingBottom: theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border 
+    borderBottomColor: theme.colors.border,
   },
-  stat: { alignItems: 'center' },
-  statValue: { ...theme.typography.h2, color: theme.colors.primary },
-  statLabel: { ...theme.typography.caption, marginTop: theme.spacing.xs },
-  
-  summarySection: { marginBottom: theme.spacing.md },
-  sectionTitle: { 
-    ...theme.typography.body, 
-    fontWeight: '600',
+  headerTitle: {
+    ...theme.typography.h1,
     color: theme.colors.text,
-    marginBottom: theme.spacing.xs 
+    fontWeight: '700',
+    marginBottom: theme.spacing.xs,
   },
-  summaryText: { 
-    ...theme.typography.body, 
+  headerSubtitle: {
+    ...theme.typography.body,
     color: theme.colors.textSecondary,
-    lineHeight: 20 
   },
-  highlightText: { 
-    ...theme.typography.body, 
-    color: '#059669',
-    marginBottom: 2 
+  scrollView: { 
+    flex: 1 
   },
-  lowlightText: { 
-    ...theme.typography.body, 
-    color: '#DC2626',
-    marginBottom: 2 
+  
+  // Filters
+  filtersContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+  },
+  timeFilters: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  filterButton: {
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.radius.full,
+    backgroundColor: theme.colors.background,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  filterButtonActive: {
+    backgroundColor: theme.colors.primary,
+    borderColor: theme.colors.primary,
+  },
+  filterButtonText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+  },
+  filterButtonTextActive: {
+    color: 'white',
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.sm,
+  },
+  sortButtonText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '500',
   },
 
-  // Month view styles (unchanged)
-  monthCard: { marginHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md },
-  monthTitle: { ...theme.typography.h2, marginBottom: theme.spacing.lg },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  dayLabel: { 
-    width: `${100 / 7}%`, 
-    textAlign: 'center', 
-    ...theme.typography.caption, 
-    marginBottom: theme.spacing.sm, 
-    fontWeight: '600' 
+  // Timeline styles
+  timelineScrollContent: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl,
+    position: 'relative',
   },
-  dayCell: { 
-    width: `${100 / 7}%`, 
-    aspectRatio: 1, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    padding: theme.spacing.xs 
+  timelineLine: {
+    position: 'absolute',
+    left: theme.spacing.lg + 7,
+    top: 0,
+    bottom: 0,
+    width: 2,
+    backgroundColor: theme.colors.primary + '30',
   },
-  dayCellActive: { 
-    backgroundColor: theme.colors.surface, 
-    borderRadius: theme.radius.sm 
+  timelineItem: {
+    position: 'relative',
+    marginBottom: theme.spacing.xl,
   },
-  dayNumber: { 
-    ...theme.typography.body, 
-    color: '#000000', // Fixed: Make day numbers black for better visibility
-    fontWeight: '500' 
+  timelineDot: {
+    position: 'absolute',
+    left: 0,
+    top: 20,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary,
+    borderWidth: 4,
+    borderColor: theme.colors.background,
+    zIndex: 1,
   },
-  dayNumberActive: { 
-    color: theme.colors.text, 
-    fontWeight: '600' 
+  timelineCard: {
+    marginLeft: 28,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    padding: theme.spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  dayDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2 },
-  monthStats: { 
-    marginTop: theme.spacing.lg, 
-    paddingTop: theme.spacing.md, 
-    borderTopWidth: 1, 
-    borderTopColor: theme.colors.border 
+  timelineHeader: {
+    marginBottom: theme.spacing.md,
   },
-  monthStatText: { 
-    ...theme.typography.body, 
-    color: theme.colors.textSecondary 
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    marginBottom: theme.spacing.xs,
+  },
+  timelineDate: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '500',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+  },
+  locationText: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  timelineContent: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+    alignItems: 'flex-start',
+  },
+  timelineImageContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: theme.radius.lg,
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  timelineImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: theme.colors.surface,
+  },
+  placeholderImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: theme.colors.primary + '15',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderEmoji: {
+    fontSize: 28,
+  },
+  timelineTextContent: {
+    flex: 1,
+    paddingTop: 2,
+  },
+  timelineTitle: {
+    ...theme.typography.h3,
+    color: theme.colors.text,
+    fontWeight: '700',
+    marginBottom: theme.spacing.xs,
+    lineHeight: 24,
+  },
+  timelinePreview: {
+    ...theme.typography.body,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: theme.spacing.sm,
+  },
+  entryCountBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: theme.colors.primary + '15',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+    borderRadius: theme.radius.full,
+  },
+  entryCountText: {
+    ...theme.typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  timelineArrow: {
+    position: 'absolute',
+    left: 3,
+    bottom: -theme.spacing.lg,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: theme.colors.background,
+    borderRadius: 14,
+    zIndex: 1,
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    width: '100%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  modalTitle: {
+    ...theme.typography.h3,
+    color: theme.colors.text,
+    fontWeight: '700',
+  },
+  modalScroll: {
+    maxHeight: 300,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border + '50',
+  },
+  modalOptionSelected: {
+    backgroundColor: theme.colors.primary + '10',
+  },
+  modalOptionText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+  },
+  modalOptionTextSelected: {
+    color: theme.colors.primary,
+    fontWeight: '600',
   },
 });
-
-
-// // app/history.tsx
-
-// import { useRouter } from 'expo-router';
-// import React, { useCallback, useEffect, useRef, useState } from 'react';
-// import { Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-// import Card from '../components/Card';
-// import EmptyState from '../components/EmptyState';
-// import EntryListItem from '../components/EntryListItem';
-// import SegmentedControl from '../components/SegmentedControl';
-// import { theme } from '../constants/theme';
-// import { useJournal } from '../context/JournalContext';
-// import { entriesService } from '../services/entries';
-// import { Entry, GroupedEntries, ViewMode } from '../types/journal';
-// import { formatDisplayDate } from '../utils/format';
-
-
-// import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-// import EntryDetailSheet, { EntryDetailSheetRef } from '../components/EntryDetailSheet';
-
-// export default function HistoryScreen() {
-//   const router = useRouter();
-//   const { entries, refreshEntries, deleteEntry } = useJournal();
-
-//   const [viewMode, setViewMode] = useState<ViewMode>('day');
-//   const [groupedEntries, setGroupedEntries] = useState<GroupedEntries>({});
-//   const [refreshing, setRefreshing] = useState(false);
-
-//   // bottom sheet
-//   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
-//   const sheetRef = useRef<EntryDetailSheetRef>(null);
-
-//   const presentDetails = useCallback((entry: Entry) => {
-//     setSelectedEntry(entry);
-//     requestAnimationFrame(() => sheetRef.current?.present?.());
-//   }, []);
-
-//   const closeDetails = useCallback(() => sheetRef.current?.dismiss?.(), []);
-
-//   const parseYMD = (ymd: string) => {
-//     // ymd = 'YYYY-MM-DD'
-//     const [y, m, d] = ymd.split('-').map(n => parseInt(n, 10));
-//     return new Date(y, m - 1, d); // local, no UTC shift
-//   };
-
-//   useEffect(() => { loadGroupedEntries(); }, [entries, viewMode]);
-
-//   const loadGroupedEntries = async () => {
-//     let grouped: GroupedEntries = {};
-//     switch (viewMode) {
-//       case 'day':
-//         grouped = await entriesService.groupEntriesByDay();
-//         break;
-//       case 'week':
-//         grouped = await entriesService.groupEntriesByWeek();
-//         break;
-//       case 'month':
-//         grouped = await entriesService.groupEntriesByMonth();
-//         break;
-//     }
-//     setGroupedEntries(grouped);
-//   };
-
-//   const handleRefresh = useCallback(async () => {
-//     setRefreshing(true);
-//     await refreshEntries();
-//     setRefreshing(false);
-//   }, [refreshEntries]);
-
-//   const handleEntryPress = (entry: Entry) => {
-//     presentDetails(entry);
-//   };
-
-//   const handleEntryDelete = (entry: Entry) => {
-//     Alert.alert('Delete Entry', 'Are you sure you want to delete this entry?', [
-//       { text: 'Cancel', style: 'cancel' },
-//       {
-//         text: 'Delete',
-//         style: 'destructive',
-//         onPress: async () => {
-//           await deleteEntry(entry.id);
-//           if (selectedEntry?.id === entry.id) {
-//             closeDetails();
-//             setSelectedEntry(null);
-//           }
-//         },
-//       },
-//     ]);
-//   };
-
-//   const renderDayView = () => {
-//     if (entries.length === 0) {
-//       return (
-//         <EmptyState
-//           icon="book-outline"
-//           title="No entries yet"
-//           message="Start journaling to see your thoughts here"
-//           actionLabel="Create Entry"
-//           onAction={() => router.push('/')}
-//         />
-//       );
-//     }
-//     return (
-//       <FlatList
-//         data={entries}
-//         keyExtractor={(item) => item.id}
-//         renderItem={({ item }) => (
-//           <EntryListItem
-//             entry={item}
-//             onPress={() => handleEntryPress(item)}
-//             onDelete={() => handleEntryDelete(item)}
-//           />
-//         )}
-//         contentContainerStyle={styles.listContent}
-//         refreshControl={
-//           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary} />
-//         }
-//       />
-//     );
-//   };
-
-//   const renderWeekView = () => {
-//     const weeks = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
-//     if (weeks.length === 0) {
-//       return <EmptyState icon="calendar-outline" title="No weekly data" message="Create entries to see weekly summaries" />;
-//     }
-//     return (
-//       <ScrollView
-//         style={styles.scrollView}
-//         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary} />}
-//       >
-//         {weeks.map((weekStart) => {
-//           const weekEntries = groupedEntries[weekStart];
-//           const avgMood = weekEntries.reduce((sum, e) => sum + (e.mood || 3), 0) / weekEntries.length;
-
-//           const tagCounts = new Map<string, number>();
-//           weekEntries.forEach(e => (e.tags ?? []).forEach(t => tagCounts.set(t.name, (tagCounts.get(t.name) || 0) + 1)));
-//           const topTag = Array.from(tagCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
-
-//           return (
-//             <Card key={weekStart} style={styles.weekCard}>
-//               <Text style={styles.weekTitle}>Week of {formatDisplayDate(weekStart)}</Text>
-//               <View style={styles.weekStats}>
-//                 <View style={styles.stat}>
-//                   <Text style={styles.statValue}>{weekEntries.length}</Text>
-//                   <Text style={styles.statLabel}>Entries</Text>
-//                 </View>
-//                 <View style={styles.stat}>
-//                   <Text style={styles.statValue}>{avgMood.toFixed(1)}</Text>
-//                   <Text style={styles.statLabel}>Avg Mood</Text>
-//                 </View>
-//                 {topTag && (
-//                   <View style={styles.stat}>
-//                     <Text style={styles.statValue}>#{topTag}</Text>
-//                     <Text style={styles.statLabel}>Top Tag</Text>
-//                   </View>
-//                 )}
-//               </View>
-//             </Card>
-//           );
-//         })}
-//       </ScrollView>
-//     );
-//   };
-
-//   const renderMonthView = () => {
-//     // 1) Collapse arbitrary keys in groupedEntries to unique month buckets (YYYY-MM)
-//     const monthMap = new Map<string, Entry[]>();
-
-//     Object.entries(groupedEntries).forEach(([key, list]) => {
-//       const d = parseYMD(key);                    // key might be any YYYY-MM-DD
-//       const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-//       const prev = monthMap.get(monthKey) ?? [];
-//       monthMap.set(monthKey, prev.concat(list));
-//     });
-
-//     // 2) Sort month keys newest → oldest
-//     const months = Array.from(monthMap.keys()).sort((a, b) => b.localeCompare(a));
-
-//     if (months.length === 0) {
-//       return (
-//         <EmptyState
-//           icon="calendar-outline"
-//           title="No monthly data"
-//           message="Create entries to see monthly summaries"
-//         />
-//       );
-//     }
-
-//     const getMoodColor = (mood: number): string => {
-//       const colors = [
-//         theme.colors.mood1,
-//         theme.colors.mood2,
-//         theme.colors.mood3,
-//         theme.colors.mood4,
-//         theme.colors.mood5,
-//       ];
-//       return colors[Math.min(Math.max(mood - 1, 0), 4)];
-//     };
-
-//     return (
-//       <ScrollView
-//         style={styles.scrollView}
-//         refreshControl={
-//           <RefreshControl
-//             refreshing={refreshing}
-//             onRefresh={handleRefresh}
-//             tintColor={theme.colors.primary}
-//           />
-//         }
-//       >
-//         {months.map((monthKey) => {
-//           const monthEntries = monthMap.get(monthKey)!;
-
-//           // Build a Date for the 1st of this month for calendar math + nice title
-//           const [y, m] = monthKey.split('-').map((n) => parseInt(n, 10));
-//           const monthStartDate = new Date(y, m - 1, 1);
-//           const monthName = monthStartDate.toLocaleDateString('en-US', {
-//             month: 'long',
-//             year: 'numeric',
-//           });
-
-//           // Calendar shape
-//           const daysInMonth = new Date(y, m, 0).getDate(); // last day of month
-//           const firstDay = new Date(y, m - 1, 1).getDay();
-
-//           // Map entries by day number within this month
-//           const entriesByDay = new Map<number, Entry[]>();
-//           monthEntries.forEach((e) => {
-//             const ed = parseYMD(e.date);
-//             if (ed.getFullYear() !== y || ed.getMonth() !== m - 1) return; // safety
-//             const dd = ed.getDate();
-//             const arr = entriesByDay.get(dd) ?? [];
-//             arr.push(e);
-//             entriesByDay.set(dd, arr);
-//           });
-
-//           return (
-//             <Card key={monthKey} style={styles.monthCard}>
-//               <Text style={styles.monthTitle}>{monthName}</Text>
-
-//               <View style={styles.calendarGrid}>
-//                 {/* day labels */}
-//                 {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-//                   <Text key={i} style={styles.dayLabel}>
-//                     {d}
-//                   </Text>
-//                 ))}
-
-//                 {/* leading empties */}
-//                 {Array.from({ length: firstDay }).map((_, i) => (
-//                   <View key={`empty-${i}`} style={styles.dayCell} />
-//                 ))}
-
-//                 {/* days */}
-//                 {Array.from({ length: daysInMonth }).map((_, i) => {
-//                   const day = i + 1;
-//                   const dayEntries = entriesByDay.get(day) || [];
-//                   const has = dayEntries.length > 0;
-//                   const avgMood = has
-//                     ? dayEntries.reduce((s, e) => s + (e.mood || 3), 0) / dayEntries.length
-//                     : 0;
-
-//                   return (
-//                     <TouchableOpacity
-//                       key={day}
-//                       style={[styles.dayCell, has && styles.dayCellActive]}
-//                       onPress={() => has && presentDetails(dayEntries[0])}
-//                       activeOpacity={has ? 0.7 : 1}
-//                     >
-//                       <Text style={[styles.dayNumber, has && styles.dayNumberActive]}>{day}</Text>
-//                       {has && (
-//                         <View
-//                           style={[
-//                             styles.dayDot,
-//                             { backgroundColor: theme.colors.primary },
-//                           ]}
-//                         />
-//                       )}
-//                     </TouchableOpacity>
-//                   );
-//                 })}
-//               </View>
-
-//               <View style={styles.monthStats}>
-//                 <Text style={styles.monthStatText}>
-//                   {monthEntries.length} entries this month
-//                 </Text>
-//               </View>
-//             </Card>
-//           );
-//         })}
-//       </ScrollView>
-//     );
-//   };
-
-//   return (
-//     <BottomSheetModalProvider>
-//       <View style={styles.container}>
-//         <SegmentedControl
-//           options={['Day', 'Week', 'Month']}
-//           selectedIndex={viewMode === 'day' ? 0 : viewMode === 'week' ? 1 : 2}
-//           onChange={(i) => setViewMode(['day', 'week', 'month'][i] as ViewMode)}
-//           style={styles.segmentedControl}
-//           activeColor={theme.colors.primary}
-//           activeBackground={theme.colors.surface}
-//         />
-
-//         {viewMode === 'day' && renderDayView()}
-//         {viewMode === 'week' && renderWeekView()}
-//         {viewMode === 'month' && renderMonthView()}
-
-//         <EntryDetailSheet ref={sheetRef} entry={selectedEntry} onDismiss={() => setSelectedEntry(null)} />
-//       </View>
-//     </BottomSheetModalProvider>
-//   );
-// }
-
-// const styles = StyleSheet.create({
-//   container: { flex: 1, backgroundColor: theme.colors.background },
-//   segmentedControl: { marginHorizontal: theme.spacing.lg, marginVertical: theme.spacing.md },
-//   scrollView: { flex: 1 },
-//   listContent: { paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xl },
-
-//   // week
-//   weekCard: { marginHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md },
-//   weekTitle: { ...theme.typography.h2, marginBottom: theme.spacing.md },
-//   weekStats: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: theme.spacing.md },
-//   stat: { alignItems: 'center' },
-//   statValue: { ...theme.typography.h2, color: theme.colors.primary },
-//   statLabel: { ...theme.typography.caption, marginTop: theme.spacing.xs },
-
-//   // month
-//   monthCard: { marginHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md },
-//   monthTitle: { ...theme.typography.h2, marginBottom: theme.spacing.lg },
-//   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-//   dayLabel: { width: `${100 / 7}%`, textAlign: 'center', ...theme.typography.caption, marginBottom: theme.spacing.sm, fontWeight: '600' },
-//   dayCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center', padding: theme.spacing.xs },
-//   dayCellActive: { backgroundColor: theme.colors.surface, borderRadius: theme.radius.sm },
-//   dayNumber: { ...theme.typography.body, color: theme.colors.textSecondary },
-//   dayNumberActive: { color: theme.colors.text, fontWeight: '600' },
-//   dayDot: { width: 6, height: 6, borderRadius: 3, marginTop: 2 },
-//   monthStats: { marginTop: theme.spacing.lg, paddingTop: theme.spacing.md, borderTopWidth: 1, borderTopColor: theme.colors.border },
-//   monthStatText: { ...theme.typography.body, color: theme.colors.textSecondary },
-// });

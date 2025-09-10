@@ -10,6 +10,7 @@ export const theme = {
       muted: '#9CA3AF',
       success: '#10B981',
       warning: '#F59E0B',
+      black: '#000000',
       // Mood colors
       mood1: '#ef4444',
       mood2: '#f59e0b',
@@ -25,6 +26,7 @@ export const theme = {
       xl: 24, 
       xxl: 32,
       xxxl: 48,
+      xxxxl: 72,
     },
     radius: { 
       sm: 8, 

@@ -2,8 +2,8 @@
 // app.config.ts
 import type { ExpoConfig } from 'expo/config';
 
-const APP_NAME = 'Jeevun';
-const SLUG = 'jeevunai';
+const APP_NAME = 'Quill';
+const SLUG = 'quillai';
 
 const EXPO_PUBLIC_SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const EXPO_PUBLIC_SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -12,30 +12,31 @@ const EXPO_PUBLIC_USE_LOCAL_FUNCTIONS = process.env.EXPO_PUBLIC_USE_LOCAL_FUNCTI
 const config: ExpoConfig = {
   name: APP_NAME,
   slug: SLUG,
-
-  scheme: 'jeevun',
+  icon: './assets/images/quill_logo.png',
+  scheme: 'quill',
   version: '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
 
   ios: {
-    bundleIdentifier: 'com.kedarpujara.jeevun',
+    bundleIdentifier: 'com.kedarpujara.quill',
     supportsTablet: true,
     infoPlist: {
-      ITSAppUsesNonExemptEncryption: false,
-      NSCameraUsageDescription: 'Jeevun needs camera access to attach photos to your entries.',
-      NSMicrophoneUsageDescription: 'Jeevun uses your microphone to record voice notes.',
-      NSPhotoLibraryUsageDescription: 'Allow Jeevun to access your photos to attach images.',
-      NSLocationWhenInUseUsageDescription: 'Jeevun can tag entries with your location.',
+      ITSAppUsesNonExemptEncryption: false, 
+      NSCameraUsageDescription: 'Quill needs camera access to attach photos to your entries.',
+      NSMicrophoneUsageDescription: 'Quill uses your microphone to record voice notes.',
+      NSPhotoLibraryUsageDescription: 'Allow Quill to access your photos to attach images.',
+      NSLocationWhenInUseUsageDescription: 'Quill can tag entries with your location.',
       UIViewControllerBasedStatusBarAppearance: false,
       UIStatusBarStyle: 'UIStatusBarStyleDefault',
       NSFaceIDUsageDescription: "Use Face ID to quickly access your journal entries",
+      NSUserNotificationUsageDescription: 'Quill uses notifications to remind you to journal.',
     },
   },
 
   android: {
-    package: 'com.kedarpujara.jeevun',
+    package: 'com.kedarpujara.quill',
     versionCode: 1,
     adaptiveIcon: {
       foregroundImage: './assets/images/adaptive-icon.png',
@@ -85,7 +86,7 @@ const config: ExpoConfig = {
       appRoot: 'app',
     },
     eas: {
-      projectId: "e0161090-b383-4c9b-a241-8a2f4b7b2bd4"
+      projectId: "6317edcc-cf51-4e87-8c29-696b54aaaf9a"
     },
 
     // Public runtime vars

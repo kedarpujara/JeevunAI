@@ -6,19 +6,6 @@ import { ActivityIndicator, View } from 'react-native';
 import { Alert } from 'react-native';
 import { ENV, hostedFunctionsBaseUrl } from '@/config/env';
 
-// Add this in useEffect or component mount:
-// useEffect(() => {
-//   const envDebug = {
-//     SUPABASE_URL: ENV.SUPABASE_URL,
-//     SUPABASE_ANON_KEY: ENV.SUPABASE_ANON_KEY ? 'EXISTS' : 'MISSING',
-//     USE_LOCAL_FUNCTIONS: ENV.USE_LOCAL_FUNCTIONS,
-//     hostedFunctionsBaseUrl,
-//   };
-  
-//   console.log('ENV Debug:', envDebug);
-//   Alert.alert('ENV Debug', JSON.stringify(envDebug, null, 2));
-// }, []);
-
 export default function Index() {
   const router = useRouter();
 

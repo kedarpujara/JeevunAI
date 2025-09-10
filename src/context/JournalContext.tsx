@@ -1,5 +1,7 @@
+// src/context/JournalContext.tsx
 import { entriesService } from '@/services/entries';
 import { supabase } from '@/services/supabase';
+import EfficientPeriodAnalyzer from '@/services/periodAnalyzerEfficient';
 import { Entry } from '@/types/journal';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
@@ -10,6 +12,8 @@ interface JournalContextType {
   createEntry: (data: Partial<Entry>) => Promise<Entry>;
   updateEntry: (id: string, updates: Partial<Entry>) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
+  // New: Efficient day title access
+  getDayTitle: (date: string, dayEntries: Entry[]) => Promise<string>;
 }
 
 const JournalContext = createContext<JournalContextType | undefined>(undefined);
@@ -37,32 +41,93 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const createEntry = useCallback(async (data: Partial<Entry>) => {
-    const e = await entriesService.createEntry(data);
+    const entry = await entriesService.createEntry(data);
     await refreshEntries();
-    return e;
+    
+    // Trigger efficient analysis check
+    if (entry.date) {
+      EfficientPeriodAnalyzer.handleEntryChange(entry.date).catch(error => {
+        console.log('Background analysis trigger failed (non-critical):', error);
+      });
+    }
+    
+    return entry;
   }, [refreshEntries]);
 
   const updateEntry = useCallback(async (id: string, updates: Partial<Entry>) => {
+    const oldEntry = entries.find(e => e.id === id);
     await entriesService.updateEntry(id, updates);
     await refreshEntries();
-  }, [refreshEntries]);
+    
+    // Trigger analysis check for affected date(s)
+    if (oldEntry?.date) {
+      EfficientPeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
+        console.log('Background analysis trigger failed (non-critical):', error);
+      });
+    }
+    
+    // If date changed, check the new date too
+    if (updates.date && updates.date !== oldEntry?.date) {
+      EfficientPeriodAnalyzer.handleEntryChange(updates.date).catch(error => {
+        console.log('Background analysis trigger failed (non-critical):', error);
+      });
+    }
+  }, [refreshEntries, entries]);
 
   const deleteEntry = useCallback(async (id: string) => {
+    const oldEntry = entries.find(e => e.id === id);
     await entriesService.deleteEntry(id);
     await refreshEntries();
-  }, [refreshEntries]);
+    
+    // Trigger analysis check for affected date
+    if (oldEntry?.date) {
+      EfficientPeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
+        console.log('Background analysis trigger failed (non-critical):', error);
+      });
+    }
+  }, [refreshEntries, entries]);
 
-  useEffect(() => { refreshEntries(); }, [refreshEntries]);
+  // Efficient day title getter
+  const getDayTitle = useCallback(async (date: string, dayEntries: Entry[]): Promise<string> => {
+    return EfficientPeriodAnalyzer.getDayTitle(date, dayEntries);
+  }, []);
+
+  useEffect(() => { 
+    refreshEntries(); 
+  }, [refreshEntries]);
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
       refreshEntries();
     });
-    return () => { sub.subscription.unsubscribe(); };
+    return () => { 
+      sub.subscription.unsubscribe(); 
+    };
   }, [refreshEntries]);
 
+  // Periodic cleanup of outdated summaries (runs once when context loads)
+  useEffect(() => {
+    const cleanupOutdatedSummaries = () => {
+      EfficientPeriodAnalyzer.processOutdatedSummaries(3).catch(error => {
+        console.log('Background cleanup failed (non-critical):', error);
+      });
+    };
+
+    // Run cleanup after initial load
+    const timer = setTimeout(cleanupOutdatedSummaries, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
-    <JournalContext.Provider value={{ entries, isLoading, refreshEntries, createEntry, updateEntry, deleteEntry }}>
+    <JournalContext.Provider value={{ 
+      entries, 
+      isLoading, 
+      refreshEntries, 
+      createEntry, 
+      updateEntry, 
+      deleteEntry,
+      getDayTitle 
+    }}>
       {children}
     </JournalContext.Provider>
   );

@@ -13,12 +13,13 @@ import {
   TouchableOpacity, 
   View,
   KeyboardAvoidingView,
-  ActivityIndicator
+  ActivityIndicator,
+  TouchableWithoutFeedback
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { theme } from '@/constants/theme';
-import { EntryData } from '@/app/create';
+import { EntryData } from '@/screens/CreateScreen';
 
 // Mood emoji mapping
 const MOOD_EMOJIS = ['😔', '🙁', '😐', '🙂', '😄'];
@@ -27,6 +28,7 @@ interface EntryEditorProps {
   entryData: EntryData;
   onUpdateEntry: (data: EntryData) => void;
   onSave: () => void;
+  onCancel?: () => void;
   onPickImage: () => void;
   onTakePhoto: () => void;
   onRemovePhoto: (index: number) => void;
@@ -36,6 +38,7 @@ interface EntryEditorProps {
   isSaving: boolean;
   isTranscribing: boolean;
   hasContent: boolean;
+  isEditing?: boolean;
   hasLocationConfirmation?: boolean;
 }
 
@@ -49,6 +52,7 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
     entryData,
     onUpdateEntry,
     onSave,
+    onCancel,
     onPickImage,
     onTakePhoto,
     onRemovePhoto,
@@ -58,6 +62,7 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
     isSaving,
     isTranscribing,
     hasContent,
+    isEditing = false,
     hasLocationConfirmation = false,
   }, ref) => {
     const bottomSheetRef = useRef<BottomSheet>(null);
@@ -74,8 +79,11 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
     const handleSheetChanges = useCallback((index: number) => {
       if (index === -1) {
         Keyboard.dismiss();
+        if (isEditing && onCancel) {
+          onCancel();
+        }
       }
-    }, []);
+    }, [isEditing, onCancel]);
 
     const updateField = (field: keyof EntryData, value: any) => {
       onUpdateEntry({ ...entryData, [field]: value });
@@ -103,7 +111,6 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
         enablePanDownToClose
         backgroundStyle={styles.bottomSheetBackground}
         handleIndicatorStyle={styles.handleIndicator}
-        // V2: Hide background when sheet is open to remove bottom nav visibility
         backgroundComponent={({ style }) => (
           <View style={[style, styles.sheetOverlay]} />
         )}
@@ -147,7 +154,7 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
               style={styles.titleInput}
               value={entryData.title}
               onChangeText={(text) => updateField('title', text)}
-              placeholder="Entry Ttile (optional)"
+              placeholder="Entry Title (optional)"
               placeholderTextColor={theme.colors.textSecondary}
               maxLength={100}
             />
@@ -230,45 +237,51 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
                   ))}
                 </View>
               </View>
-            )}
+            )}            
 
-            {/* Mood Selection */}
-            <View style={styles.moodSection}>
-              <Text style={styles.fieldLabel}>HOW ARE YOU FEELING?</Text>
-              <View style={styles.moodRow}>
-                {MOOD_EMOJIS.map((emoji, index) => {
-                  const moodValue = index + 1;
-                  const isSelected = entryData.mood === moodValue;
-                  return (
-                    <TouchableOpacity
-                      key={index}
-                      style={[styles.moodButton, isSelected && styles.moodButtonSelected]}
-                      onPress={() => handleMoodSelect(moodValue)}
-                    >
-                      <Text style={styles.moodEmoji}>{emoji}</Text>
-                      <Text style={styles.moodNumber}>{moodValue}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* V2: Enhanced Save Button with better spacing */}
+            {/* Save/Cancel buttons for edit mode */}
             <View style={styles.saveButtonContainer}>
-              <TouchableOpacity
-                style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
-                onPress={onSave}
-                disabled={!canSave}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-                    <Text style={styles.saveButtonText}>Save Entry</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              {isEditing ? (
+                <View style={styles.editButtonsContainer}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={onCancel}
+                    disabled={isSaving}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.saveButton, styles.editSaveButton, !canSave && styles.saveButtonDisabled]}
+                    onPress={onSave}
+                    disabled={!canSave}
+                  >
+                    {isSaving ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                        <Text style={styles.saveButtonText}>Update Entry</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.saveButton, !canSave && styles.saveButtonDisabled]}
+                  onPress={onSave}
+                  disabled={!canSave}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                      <Text style={styles.saveButtonText}>Save Entry</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* V2: Additional spacing to ensure content is visible above bottom nav area */}
@@ -349,7 +362,7 @@ const styles = StyleSheet.create({
   
   titleInput: {
     ...theme.typography.body,
-    color: theme.colors.text,
+    color: theme.colors.black,
     backgroundColor: 'transparent',
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
@@ -506,6 +519,33 @@ const styles = StyleSheet.create({
   saveButtonContainer: {
     marginTop: theme.spacing.lg,
     marginBottom: theme.spacing.lg,
+  },
+  
+  editButtonsContainer: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+  },
+  
+  cancelButton: {
+    flex: 1,
+    backgroundColor: theme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: theme.spacing.lg,
+    borderRadius: theme.radius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  
+  cancelButtonText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
+  
+  editSaveButton: {
+    flex: 2,
   },
   
   saveButton: {
