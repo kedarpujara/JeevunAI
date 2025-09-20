@@ -27,9 +27,13 @@ export default function AIInsightsScreen() {
     router.push('/month-review');
   };
 
+  const handleAllTimeReview = () => {
+    router.push('/all-time-review');
+  }
+
   const handleUnavailableFeature = () => {
     // Could show a "Coming Soon" modal or just ignore tap
-  };
+  };  
 
   return (
     <View style={styles.container}>
@@ -78,6 +82,22 @@ export default function AIInsightsScreen() {
             </View>
             <Text style={styles.insightDescription}>
               Monthly trends, mood patterns, and writing insights
+            </Text>
+          </Card>
+        </TouchableOpacity>
+
+        {/* All Time Review */}
+        <TouchableOpacity onPress={handleAllTimeReview}>
+          <Card style={styles.insightCard}>
+            <View style={styles.insightHeader}>
+              <View style={styles.insightIcon}>
+                <Ionicons name="telescope-outline" size={24} color={theme.colors.primary} />
+              </View>
+              <Text style={styles.insightTitle}>All Time Review</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+            </View>
+            <Text style={styles.insightDescription}>
+              Your complete journaling journey from start to finish
             </Text>
           </Card>
         </TouchableOpacity>
@@ -231,21 +251,6 @@ export default function AIInsightsScreen() {
             </Text>
           </Card>
         </TouchableOpacity>
-
-        {/* Premium Banner */}
-        <Card style={[styles.insightCard, styles.premiumBanner]}>
-          <View style={styles.premiumContent}>
-            <View style={styles.premiumIcon}>
-              <Ionicons name="star" size={28} color="#FFD700" />
-            </View>
-            <View style={styles.premiumText}>
-              <Text style={styles.premiumTitle}>Unlock Premium Insights</Text>
-              <Text style={styles.premiumDescription}>
-                Get deeper analysis and unlimited access to all AI-powered insights
-              </Text>
-            </View>
-          </View>
-        </Card>
       </ScrollView>
     </View>
   );

@@ -1,7 +1,7 @@
 // src/context/JournalContext.tsx
 import { entriesService } from '@/services/entries';
 import { supabase } from '@/services/supabase';
-import EfficientPeriodAnalyzer from '@/services/periodAnalyzerEfficient';
+import PeriodAnalyzer from '@/services/periodAnalyzer';
 import { Entry } from '@/types/journal';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
@@ -46,7 +46,7 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
     
     // Trigger efficient analysis check
     if (entry.date) {
-      EfficientPeriodAnalyzer.handleEntryChange(entry.date).catch(error => {
+      PeriodAnalyzer.handleEntryChange(entry.date).catch(error => {
         console.log('Background analysis trigger failed (non-critical):', error);
       });
     }
@@ -61,14 +61,14 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
     
     // Trigger analysis check for affected date(s)
     if (oldEntry?.date) {
-      EfficientPeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
+      PeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
         console.log('Background analysis trigger failed (non-critical):', error);
       });
     }
     
     // If date changed, check the new date too
     if (updates.date && updates.date !== oldEntry?.date) {
-      EfficientPeriodAnalyzer.handleEntryChange(updates.date).catch(error => {
+      PeriodAnalyzer.handleEntryChange(updates.date).catch(error => {
         console.log('Background analysis trigger failed (non-critical):', error);
       });
     }
@@ -81,7 +81,7 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
     
     // Trigger analysis check for affected date
     if (oldEntry?.date) {
-      EfficientPeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
+      PeriodAnalyzer.handleEntryChange(oldEntry.date).catch(error => {
         console.log('Background analysis trigger failed (non-critical):', error);
       });
     }
@@ -89,7 +89,7 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
 
   // Efficient day title getter
   const getDayTitle = useCallback(async (date: string, dayEntries: Entry[]): Promise<string> => {
-    return EfficientPeriodAnalyzer.getDayTitle(date, dayEntries);
+    return PeriodAnalyzer.getDayTitle(date, dayEntries);
   }, []);
 
   useEffect(() => { 
@@ -108,7 +108,7 @@ export function JournalProvider({ children }: { children: React.ReactNode }) {
   // Periodic cleanup of outdated summaries (runs once when context loads)
   useEffect(() => {
     const cleanupOutdatedSummaries = () => {
-      EfficientPeriodAnalyzer.processOutdatedSummaries(3).catch(error => {
+      PeriodAnalyzer.processOutdatedSummaries(3).catch(error => {
         console.log('Background cleanup failed (non-critical):', error);
       });
     };

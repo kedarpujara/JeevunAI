@@ -1,4 +1,4 @@
-// app/history.tsx - Simplified Timeline Only
+// app/history.tsx - Fixed emoji and removed preview text + added streak display
 
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -8,13 +8,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import EmptyState from '../components/EmptyState';
 import { theme } from '../constants/theme';
 import { useJournal } from '../context/JournalContext';
+import { useJournalStats } from '../hooks/useJournalStats';
 import { entriesService } from '../services/entries';
 import { Entry, GroupedEntries } from '../types/journal';
 import { formatDisplayDate } from '../utils/format';
+import PeriodAnalyzer from '../services/periodAnalyzer';
+import { supabase } from '@/services/supabase';
 
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import EntryDetailSheet, { EntryDetailSheetRef } from '../components/EntryDetailSheet';
-import TimelineItem from '../components/TimelineItem';
 
 type TimelineFilter = 'week' | 'month' | 'all';
 type SortOrder = 'latest' | 'earliest';
@@ -24,25 +26,66 @@ const STORAGE_KEYS = {
   SORT_ORDER: 'sort_order',
 };
 
+const SafeImage = ({ uri, style, fallbackEmoji = '📝' }: { 
+  uri: string; 
+  style: any; 
+  fallbackEmoji?: string;
+}) => {
+  const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+    setImageLoaded(false);
+  }, [uri]);
+
+  if (imageError || !uri) {
+    return (
+      <View style={[style, { backgroundColor: theme.colors.primary + '15', justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ fontSize: 28 }}>{fallbackEmoji}</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      onError={(error) => {
+        console.log('Failed to load image:', uri);
+        setImageError(true);
+      }}
+      onLoad={() => {
+        setImageLoaded(true);
+      }}
+      onLoadStart={() => {
+        setImageLoaded(false);
+      }}
+    />
+  );
+};
+
 export default function HistoryScreen() {
   const router = useRouter();
   const { entries, refreshEntries, deleteEntry } = useJournal();
+  const stats = useJournalStats(); // ✅ Added stats hook
 
   const [groupedEntries, setGroupedEntries] = useState<GroupedEntries>({});
   const [refreshing, setRefreshing] = useState(false);
   
-  // Timeline filters
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
   
-  // Filter selectors
   const [showWeekSelector, setShowWeekSelector] = useState(false);
   const [showMonthSelector, setShowMonthSelector] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  // bottom sheet
+  const [dayTitles, setDayTitles] = useState<Record<string, string>>({});
+  const [titlesLoaded, setTitlesLoaded] = useState(false);
+
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
+  const [processingTap, setProcessingTap] = useState(false); // ✅ Prevent double-tap on timeline items
   const sheetRef = useRef<EntryDetailSheetRef>(null);
 
   const presentDetails = useCallback((entry: Entry) => {
@@ -53,11 +96,9 @@ export default function HistoryScreen() {
   const closeDetails = useCallback(() => sheetRef.current?.dismiss?.(), []);
 
   const parseYMD = (ymd: string) => {
-    // ymd = 'YYYY-MM-DD' - ensure we use the exact date without timezone shifts
-    return new Date(ymd + 'T00:00:00.000'); // Force local midnight
+    return new Date(ymd + 'T00:00:00.000');
   };
 
-  // Load saved preferences
   useEffect(() => {
     loadSavedPreferences();
   }, []);
@@ -82,15 +123,113 @@ export default function HistoryScreen() {
     }
   };
 
-  useEffect(() => { loadGroupedEntries(); }, [entries, timelineFilter]);
+  useEffect(() => { 
+    loadGroupedEntries(); 
+  }, [entries, timelineFilter]);
 
   const loadGroupedEntries = async () => {
     const grouped = await entriesService.groupEntriesByDay();
     setGroupedEntries(grouped);
+    // ✅ Only reset titles if entries actually changed, not on every refresh
+    const hasChanged = JSON.stringify(Object.keys(grouped)) !== JSON.stringify(Object.keys(groupedEntries));
+    if (hasChanged) {
+      setTitlesLoaded(false);
+      setDayTitles({});
+    }
+  };
+
+  // ✅ Improved title loading to prevent flicker during refresh
+  useEffect(() => {
+    if (Object.keys(groupedEntries).length > 0 && !titlesLoaded) {
+      loadAllDayTitles();
+    }
+  }, [groupedEntries, titlesLoaded]);
+
+  const loadAllDayTitles = async () => {
+    try {
+      console.log('🔍 Loading all day titles from database...');
+      
+      const multipleDays = Object.entries(groupedEntries)
+        .filter(([date, entries]) => entries.length > 1)
+        .map(([date]) => date);
+  
+      if (multipleDays.length === 0) {
+        setTitlesLoaded(true);
+        return;
+      }
+  
+      // ✅ FIXED: Also select needs_regeneration flag
+      const { data: existingSummaries } = await supabase
+        .from('day_summaries')
+        .select('date, title, needs_regeneration')
+        .in('date', multipleDays);
+  
+      const titlesFromDB: Record<string, string> = {};
+      const daysNeedingGeneration: string[] = [];
+  
+      if (existingSummaries) {
+        existingSummaries.forEach(summary => {
+          // ✅ FIXED: Only use titles that don't need regeneration
+          if (!summary.needs_regeneration) {
+            titlesFromDB[summary.date] = summary.title;
+            console.log(`💾 Loaded from DB: ${summary.date} → "${summary.title}"`);
+          } else {
+            console.log(`🔄 Skipping ${summary.date} - needs regeneration`);
+            daysNeedingGeneration.push(summary.date);
+          }
+        });
+      }
+  
+      // ✅ FIXED: Check for days that don't have valid titles (including ones needing regeneration)
+      multipleDays.forEach(date => {
+        if (!titlesFromDB[date]) {
+          daysNeedingGeneration.push(date);
+        }
+      });
+  
+      // ✅ Set all titles immediately to prevent flicker
+      Object.entries(groupedEntries).forEach(([date, dayEntries]) => {
+        if (dayEntries.length === 1) {
+          titlesFromDB[date] = dayEntries[0].title || 'Daily Entry';
+        } else if (!titlesFromDB[date]) {
+          // ✅ Use stable fallback for days waiting for AI generation
+          titlesFromDB[date] = `${dayEntries.length} entries`;
+        }
+      });
+  
+      setDayTitles(titlesFromDB);
+      setTitlesLoaded(true);
+  
+      // Generate missing titles in background
+      if (daysNeedingGeneration.length > 0) {
+        console.log(`🤖 Generating ${daysNeedingGeneration.length} missing/outdated titles in background...`);
+        
+        daysNeedingGeneration.forEach(async (date) => {
+          try {
+            const dayEntries = groupedEntries[date];
+            const analysis = await PeriodAnalyzer.analyzeDayEntries(date, dayEntries);
+            
+            // ✅ Update the title in the UI immediately after AI completes
+            setDayTitles(prev => ({ ...prev, [date]: analysis.title }));
+            console.log(`✅ Generated and cached: ${date} → "${analysis.title}"`);
+            
+          } catch (error) {
+            console.error(`❌ Failed to generate title for ${date}:`, error);
+          }
+        });
+      }
+  
+    } catch (error) {
+      console.error('Failed to load day titles:', error);
+      setTitlesLoaded(true);
+    }
   };
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    // ✅ Reset title state to prevent showing stale titles during refresh
+    setTitlesLoaded(false);
+    setDayTitles({});
     await refreshEntries();
     setRefreshing(false);
   }, [refreshEntries]);
@@ -116,14 +255,12 @@ export default function HistoryScreen() {
     ]);
   };
 
-  // Filter entries by time period
   const getFilteredEntries = () => {
     const now = new Date();
     
     switch (timelineFilter) {
       case 'week':
         if (selectedWeek) {
-          // Filter by specific week
           const weekStart = new Date(selectedWeek);
           const weekEnd = new Date(weekStart);
           weekEnd.setDate(weekStart.getDate() + 6);
@@ -137,7 +274,6 @@ export default function HistoryScreen() {
           });
           return filtered;
         } else {
-          // Default to last 7 days
           const cutoffDate = new Date();
           cutoffDate.setDate(now.getDate() - 7);
           
@@ -152,7 +288,6 @@ export default function HistoryScreen() {
         }
       case 'month':
         if (selectedMonth) {
-          // Filter by specific month
           const [year, month] = selectedMonth.split('-').map(n => parseInt(n, 10));
           
           const filtered: GroupedEntries = {};
@@ -164,7 +299,6 @@ export default function HistoryScreen() {
           });
           return filtered;
         } else {
-          // Default to last 30 days
           const cutoffDate = new Date();
           cutoffDate.setMonth(now.getMonth() - 1);
           
@@ -183,7 +317,6 @@ export default function HistoryScreen() {
     }
   };
 
-  // Get available weeks for selector
   const getAvailableWeeks = () => {
     const weeks: Array<{ label: string; value: string }> = [];
     const dates = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
@@ -193,7 +326,7 @@ export default function HistoryScreen() {
     dates.forEach(date => {
       const entryDate = parseYMD(date);
       const weekStart = new Date(entryDate);
-      weekStart.setDate(entryDate.getDate() - entryDate.getDay()); // Start of week (Sunday)
+      weekStart.setDate(entryDate.getDate() - entryDate.getDay());
       
       const weekKey = weekStart.toISOString().split('T')[0];
       if (!weekMap.has(weekKey)) {
@@ -203,7 +336,7 @@ export default function HistoryScreen() {
     
     Array.from(weekMap.entries())
       .sort((a, b) => b[1].getTime() - a[1].getTime())
-      .slice(0, 8) // Limit to last 8 weeks
+      .slice(0, 8)
       .forEach(([weekKey, weekStart]) => {
         const weekEnd = new Date(weekStart);
         weekEnd.setDate(weekStart.getDate() + 6);
@@ -215,7 +348,6 @@ export default function HistoryScreen() {
     return weeks;
   };
 
-  // Get available months for selector
   const getAvailableMonths = () => {
     const months: Array<{ label: string; value: string }> = [];
     const dates = Object.keys(groupedEntries).sort((a, b) => b.localeCompare(a));
@@ -230,7 +362,7 @@ export default function HistoryScreen() {
     
     Array.from(monthMap)
       .sort((a, b) => b.localeCompare(a))
-      .slice(0, 12) // Limit to last 12 months
+      .slice(0, 12)
       .forEach(monthKey => {
         const [year, month] = monthKey.split('-').map(n => parseInt(n, 10));
         const date = new Date(year, month - 1);
@@ -241,59 +373,50 @@ export default function HistoryScreen() {
     return months;
   };
 
-  // Generate a title for a day's entries
-  const generateDayTitle = (dayEntries: Entry[]): string => {
-    if (dayEntries.length === 1) {
-      return dayEntries[0].title || 'Daily Entry';
-    }
-    
-    const moods = dayEntries.filter(e => e.mood).map(e => e.mood!);
-    const avgMood = moods.length > 0 ? moods.reduce((a, b) => a + b, 0) / moods.length : 3;
-    
-    if (avgMood >= 4) return `Great Day - ${dayEntries.length} moments`;
-    if (avgMood >= 3) return `Good Day - ${dayEntries.length} entries`;
-    if (avgMood >= 2) return `Mixed Day - ${dayEntries.length} thoughts`;
-    return `Challenging Day - ${dayEntries.length} reflections`;
-  };
-
-  const getDayPreview = (dayEntries: Entry[]): string => {
-    if (dayEntries.length === 1) {
-      return dayEntries[0].body?.substring(0, 120) + '...' || 'No content available';
-    }
-    
-    const hasContent = dayEntries.filter(e => e.body).slice(0, 2);
-    if (hasContent.length === 0) return 'Multiple entries captured for this day';
-    
-    return hasContent.map(e => e.body?.substring(0, 60)).join(' • ') + '...';
-  };
-
   const getDayFirstPhoto = (dayEntries: Entry[]): string | null => {
     for (const entry of dayEntries) {
       if (entry.photoUris && entry.photoUris.length > 0) {
-        return entry.photoUris[0];
+        const validPhoto = entry.photoUris.find(uri => {
+          if (!uri || uri.trim().length === 0) return false;
+          
+          if (uri.includes('/Containers/Data/Application/') && 
+              !uri.includes(process.env.EXPO_PUBLIC_APP_ID || '')) {
+            return false;
+          }
+          
+          return true;
+        });
+        
+        if (validPhoto) {
+          return validPhoto;
+        }
       }
     }
     return null;
   };
 
-  const handleTimelineDayPress = (date: string, dayEntries: Entry[]) => {
+  // ✅ Fix double-tap issue for timeline items
+  const handleTimelineDayPress = useCallback((date: string, dayEntries: Entry[]) => {
+    if (processingTap) return;
+    
+    setProcessingTap(true);
     router.push({
       pathname: '/day-detail',
       params: { date, entriesData: JSON.stringify(dayEntries) }
     });
-  };
+    
+    setTimeout(() => setProcessingTap(false), 1000);
+  }, [router, processingTap]);
 
   const handleTimelineFilterChange = (filter: TimelineFilter) => {
     setTimelineFilter(filter);
     savePreference(STORAGE_KEYS.TIMELINE_FILTER, filter);
     
-    // Show selector for week/month
     if (filter === 'week') {
       setShowWeekSelector(true);
     } else if (filter === 'month') {
       setShowMonthSelector(true);
     } else {
-      // Reset selections for 'all'
       setSelectedWeek(null);
       setSelectedMonth(null);
     }
@@ -324,7 +447,14 @@ export default function HistoryScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Timeline</Text>
+          <View style={styles.headerTop}>
+            <Text style={styles.headerTitle}>Journal</Text>
+            {/* ✅ Added streak display */}
+            <View style={styles.streakContainer}>
+              <Text style={styles.streakEmoji}></Text>
+              <Text style={styles.streakText}>{stats.currentStreak}</Text>
+            </View>
+          </View>
           <Text style={styles.headerSubtitle}>Your journal entries in chronological order</Text>
         </View>
         <EmptyState
@@ -341,13 +471,19 @@ export default function HistoryScreen() {
   return (
     <BottomSheetModalProvider>
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Timeline</Text>
+          <View style={styles.headerTop}>
+            <Text style={styles.headerTitle}>Journal</Text>
+            {/* ✅ Added streak display */}
+            <View style={styles.streakContainer}>
+              <Text style={styles.streakEmoji}>✍️🔥</Text>
+              <Text style={styles.streakText}>{stats.currentStreak}</Text>
+              <Text style={styles.streakText}>{stats.currentStreak === 1 ? 'day' : 'days'}</Text>
+            </View>
+          </View>
           <Text style={styles.headerSubtitle}>Your journal entries in chronological order</Text>
         </View>
 
-        {/* Filter Controls */}
         <View style={styles.filtersContainer}>
           <View style={styles.timeFilters}>
             {(['week', 'month', 'all'] as TimelineFilter[]).map((filter) => (
@@ -384,7 +520,6 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Timeline */}
         <ScrollView
           style={styles.scrollView}
           refreshControl={
@@ -400,8 +535,11 @@ export default function HistoryScreen() {
           
           {days.map((date, index) => {
             const dayEntries = filteredEntries[date];
-            const title = generateDayTitle(dayEntries);
-            const preview = getDayPreview(dayEntries);
+            // ✅ Use stable titles to prevent flicker
+            const displayTitle = dayTitles[date] || (dayEntries.length === 1 
+              ? dayEntries[0].title || 'Daily Entry'
+              : `${dayEntries.length} entries`);
+            
             const firstPhoto = getDayFirstPhoto(dayEntries);
 
             return (
@@ -412,6 +550,7 @@ export default function HistoryScreen() {
                   style={styles.timelineCard}
                   onPress={() => handleTimelineDayPress(date, dayEntries)}
                   activeOpacity={0.7}
+                  disabled={processingTap} // ✅ Prevent double-tap
                 >
                   <View style={styles.timelineHeader}>
                     <View style={styles.dateContainer}>
@@ -433,21 +572,33 @@ export default function HistoryScreen() {
                   <View style={styles.timelineContent}>
                     <View style={styles.timelineImageContainer}>
                       {firstPhoto ? (
-                        <Image source={{ uri: firstPhoto }} style={styles.timelineImage} />
+                        <SafeImage 
+                          uri={firstPhoto} 
+                          style={styles.timelineImage}
+                          fallbackEmoji="📝" 
+                        />
                       ) : (
                         <View style={styles.placeholderImage}>
+                          {/* ✅ Fixed emoji back to notebook with pencil */}
                           <Text style={styles.placeholderEmoji}>📝</Text>
                         </View>
                       )}
                     </View>
 
                     <View style={styles.timelineTextContent}>
-                      <Text style={styles.timelineTitle}>{title}</Text>
-                      <Text style={styles.timelinePreview}>{preview}</Text>
+                      <Text style={styles.timelineTitle}>
+                        {displayTitle}
+                      </Text>
                       
+                      {/* ✅ Removed preview text as requested - only show entry count */}
                       {dayEntries.length > 1 && (
                         <View style={styles.entryCountBadge}>
                           <Text style={styles.entryCountText}>{dayEntries.length} entries</Text>
+                        </View>
+                      )}
+                      {dayEntries.length === 1 && (
+                        <View style={styles.entryCountBadge}>
+                          <Text style={styles.entryCountText}>1 entry</Text>
                         </View>
                       )}
                     </View>
@@ -466,7 +617,6 @@ export default function HistoryScreen() {
 
         <EntryDetailSheet ref={sheetRef} entry={selectedEntry} onDismiss={() => setSelectedEntry(null)} />
 
-        {/* Week Selector Modal */}
         <Modal
           visible={showWeekSelector}
           transparent
@@ -507,7 +657,6 @@ export default function HistoryScreen() {
           </View>
         </Modal>
 
-        {/* Month Selector Modal */}
         <Modal
           visible={showMonthSelector}
           transparent
@@ -565,11 +714,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
+  // ✅ Added header top container for streak
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+  },
   headerTitle: {
     ...theme.typography.h1,
     color: theme.colors.text,
     fontWeight: '700',
-    marginBottom: theme.spacing.xs,
+  },
+  // ✅ Added streak container styles
+  streakContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary + '15',
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.radius.full,
+    gap: theme.spacing.xs,
+  },
+  streakEmoji: {
+    fontSize: 16,
+  },
+  streakText: {
+    ...theme.typography.body,
+    color: theme.colors.primary,
+    fontWeight: '700',
+    fontSize: 16,
   },
   headerSubtitle: {
     ...theme.typography.body,
@@ -579,7 +753,6 @@ const styles = StyleSheet.create({
     flex: 1 
   },
   
-  // Filters
   filtersContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -587,6 +760,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     backgroundColor: theme.colors.surface,
+    marginBottom: theme.spacing.md,
   },
   timeFilters: {
     flexDirection: 'row',
@@ -625,7 +799,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  // Timeline styles
   timelineScrollContent: {
     paddingHorizontal: theme.spacing.lg,
     paddingBottom: theme.spacing.xl,
@@ -641,7 +814,7 @@ const styles = StyleSheet.create({
   },
   timelineItem: {
     position: 'relative',
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.spacing.xl + theme.spacing.md,
   },
   timelineDot: {
     position: 'absolute',
@@ -661,10 +834,12 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.lg,
     padding: theme.spacing.lg,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: theme.colors.primary + '15',
   },
   timelineHeader: {
     marginBottom: theme.spacing.md,
@@ -673,12 +848,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
+    marginBottom: theme.spacing.xs,    
   },
   timelineDate: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    fontWeight: '500',
+    ...theme.typography.h4,
+    color: theme.colors.primary,
+    fontWeight: '600',
   },
   locationContainer: {
     flexDirection: 'row',
@@ -727,12 +902,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xs,
     lineHeight: 24,
   },
-  timelinePreview: {
-    ...theme.typography.body,
-    color: theme.colors.textSecondary,
-    lineHeight: 20,
-    marginBottom: theme.spacing.sm,
-  },
   entryCountBadge: {
     alignSelf: 'flex-start',
     backgroundColor: theme.colors.primary + '15',
@@ -742,13 +911,13 @@ const styles = StyleSheet.create({
   },
   entryCountText: {
     ...theme.typography.caption,
-    color: theme.colors.primary,
+    color: theme.colors.textSecondary,
     fontWeight: '600',
     fontSize: 12,
   },
   timelineArrow: {
     position: 'absolute',
-    left: 3,
+    left: -5,
     bottom: -theme.spacing.lg,
     width: 28,
     height: 28,
@@ -759,7 +928,6 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
 
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

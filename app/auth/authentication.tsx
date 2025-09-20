@@ -22,13 +22,17 @@ import { useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { supabase } from '@/services/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Linking from "expo-linking";
+import * as SecureStore from 'expo-secure-store';
+
+
 
 type AuthMode = 'signin' | 'signup';
 
 export default function AuthenticationScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  
+
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,12 +44,64 @@ export default function AuthenticationScreen() {
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const EMAIL_STORAGE_KEY = '@journal_last_email';
+  const BIOMETRIC_SESSION_KEY = 'biometric_session_v1';
+  const BIOMETRIC_FLAG_KEY = 'biometric_enabled_v1';
+
 
 
   useEffect(() => {
     loadSavedEmail();
     checkBiometricSupport();
+    (async () => {
+      const flag = await getBiometricFlag();
+      setBiometricEnabled(flag);
+    })();
   }, []);
+
+  useEffect(() => {
+    saveBiometricFlag(biometricEnabled);
+  }, [biometricEnabled]);
+
+  async function saveBiometricFlag(enabled: boolean) {
+    try {
+      await SecureStore.setItemAsync(BIOMETRIC_FLAG_KEY, enabled ? '1' : '0');
+    } catch { }
+  }
+  async function getBiometricFlag(): Promise<boolean> {
+    try {
+      return (await SecureStore.getItemAsync(BIOMETRIC_FLAG_KEY)) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  type StoredSession = {
+    access_token: string;
+    refresh_token: string;
+  };
+
+  async function saveSessionForBiometric(session: StoredSession) {
+    // On iOS, requireAuthentication puts this behind Face ID/Touch ID
+    await SecureStore.setItemAsync(BIOMETRIC_SESSION_KEY, JSON.stringify(session), {
+      requireAuthentication: true,
+    } as any);
+  }
+
+  async function getSessionFromBiometric(): Promise<StoredSession | null> {
+    const raw = await SecureStore.getItemAsync(BIOMETRIC_SESSION_KEY, {
+      requireAuthentication: true, // prompts Face ID/Touch ID on iOS
+    } as any);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async function clearBiometricSession() {
+    await SecureStore.deleteItemAsync(BIOMETRIC_SESSION_KEY);
+  }
 
   const loadSavedEmail = async () => {
     try {
@@ -84,13 +140,13 @@ export default function AuthenticationScreen() {
     if (!email.trim() || !password) return false;
     if (!validateEmail(email)) return false;
     if (password.length < 6) return false;
-    
+
     if (mode === 'signup') {
       if (!name.trim()) return false;
       if (password !== confirmPassword) return false;
       if (name.trim().length < 2) return false;
     }
-    
+
     return true;
   };
 
@@ -101,31 +157,39 @@ export default function AuthenticationScreen() {
     }
 
     setLoading(true);
-    
+
     try {
       if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data, error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
-        
+
         if (error) throw error;
 
         // Save email on successful sign in        
         await saveEmail(email);
+
+        if (biometricEnabled && biometricSupported && data.session) {
+          await saveSessionForBiometric({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          });
+        }    
+
         router.replace('/(tabs)');
-        
+
       } else {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { 
-            data: { display_name: name.trim() } 
+          options: {
+            data: { display_name: name.trim() }
           },
         });
-        
+
         if (error) throw error;
-        
+
         if (data.session?.user) {
           // Save email on successful sign up
           await saveEmail(email);
@@ -133,7 +197,7 @@ export default function AuthenticationScreen() {
           router.replace('/(tabs)');
         } else {
           Alert.alert(
-            'Check Your Email', 
+            'Check Your Email',
             'Please verify your email address to complete registration.'
           );
         }
@@ -143,6 +207,32 @@ export default function AuthenticationScreen() {
         mode === 'signin' ? 'Sign In Failed' : 'Sign Up Failed',
         error.message || 'Please try again.'
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim() || !validateEmail(email)) {
+      Alert.alert('Email Required', 'Please enter a valid email address first.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: 'quill://reset-password'
+      });
+
+
+      if (error) throw error;
+
+      Alert.alert(
+        'Reset Email Sent',
+        'Check your email for password reset instructions.'
+      );
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to send reset email.');
     } finally {
       setLoading(false);
     }
@@ -185,40 +275,40 @@ export default function AuthenticationScreen() {
               paddingHorizontal: 32,
               paddingBottom: insets.bottom + 32,
             }}>
-              
+
               {/* Logo Section */}
-            <View style={{ alignItems: 'center', marginBottom: 48 }}>
-            <View style={{
-                width: 80,
-                height: 80,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 16,
-                shadowColor: '#8B5CF6',
-                shadowOffset: { width: 0, height: 8 },
-                shadowOpacity: 0.3,
-                shadowRadius: 16,
-                elevation: 8,
-            }}>
-            <Image
-                source={require('../../assets/images/full_quill_logo.png')}
-                style={{
-                    width: 200,
-                    height: 200,
-                }}
-                resizeMode="contain"
-                />
-            </View>
-            <Text style={{
-                fontSize: 20,
-                fontWeight: '700',
-                color: '#8B5CF6',
-                letterSpacing: -0.5,
-                paddingTop: 15,
-            }}>
-                Welcome
-            </Text>
-            </View>
+              <View style={{ alignItems: 'center', marginBottom: 48 }}>
+                <View style={{
+                  width: 80,
+                  height: 80,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 16,
+                  shadowColor: '#8B5CF6',
+                  shadowOffset: { width: 0, height: 8 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 16,
+                  elevation: 8,
+                }}>
+                  <Image
+                    source={require('../../assets/images/full_quill_logo.png')}
+                    style={{
+                      width: 200,
+                      height: 200,
+                    }}
+                    resizeMode="contain"
+                  />
+                </View>
+                <Text style={{
+                  fontSize: 22,
+                  fontWeight: '500',
+                  color: '#8B5CF6',
+                  letterSpacing: -0.5,
+                  paddingTop: 15,
+                }}>
+                  where your story lives
+                </Text>
+              </View>
 
               {/* Mode Toggle */}
               <View style={{
@@ -251,7 +341,7 @@ export default function AuthenticationScreen() {
                     Sign Up
                   </Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity
                   onPress={() => switchMode('signin')}
                   style={{
@@ -279,7 +369,7 @@ export default function AuthenticationScreen() {
 
               {/* Form Fields */}
               <View style={{ gap: 20 }}>
-                
+
                 {/* Name Field (Sign Up Only) */}
                 {mode === 'signup' && (
                   <View>
@@ -517,7 +607,10 @@ export default function AuthenticationScreen() {
 
               {/* Forgot Password (Sign In Only) */}
               {mode === 'signin' && (
-                <TouchableOpacity style={{ alignSelf: 'center', marginBottom: 24 }}>
+                <TouchableOpacity
+                  style={{ alignSelf: 'center', marginBottom: 24 }}
+                  onPress={handleForgotPassword}
+                >
                   <Text style={{
                     fontSize: 15,
                     color: '#8B5CF6',
@@ -527,48 +620,6 @@ export default function AuthenticationScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
-
-              {/* Divider */}
-              <View style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                marginVertical: 24,
-              }}>
-                <View style={{ flex: 1, height: 1, backgroundColor: '#E5E7EB' }} />
-                <Text style={{
-                  marginHorizontal: 16,
-                  fontSize: 14,
-                  color: '#6B7280',
-                }}>
-                  or
-                </Text>
-                <View style={{ flex: 1, height: 1, backgroundColor: '#E5E7EB' }} />
-              </View>
-
-              {/* Google Sign In */}
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: '#FFFFFF',
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  borderRadius: 12,
-                  paddingVertical: 14,
-                  marginBottom: 24,
-                }}
-              >
-                <Ionicons name="logo-google" size={20} color="#4285F4" />
-                <Text style={{
-                  marginLeft: 12,
-                  fontSize: 16,
-                  fontWeight: '600',
-                  color: '#374151',
-                }}>
-                  {mode === 'signin' ? 'Sign in with Google' : 'Sign up with Google'}
-                </Text>
-              </TouchableOpacity>
 
               {/* Terms (Sign Up Only) */}
               {mode === 'signup' && (

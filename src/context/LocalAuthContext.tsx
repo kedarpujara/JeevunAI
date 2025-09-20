@@ -41,7 +41,7 @@ export const LocalAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // Create default profile for demo/local use
         const defaultProfile: UserProfile = {
           id: 'local-user-001',
-          email: 'user@vidaai.local',
+          email: 'user@quillai.local',
           name: 'Journal User',
           bio: 'Journaling my thoughts and experiences daily.',
           avatar_url: null,

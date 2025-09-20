@@ -68,8 +68,8 @@ A beautiful, privacy-first journaling app that makes capturing your thoughts eff
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/vidaai-journal.git
-cd vidaai-journal
+git clone https://github.com/yourusername/quillai-journal.git
+cd quillai-journal
 
 # Install dependencies
 npm install
@@ -246,9 +246,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📧 Email: support@vidaai.app
-- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/vidaai-journal/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/yourusername/vidaai-journal/discussions)
+- 📧 Email: support@quillai.app
+- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/quillai-journal/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/yourusername-quillai-journal/discussions)
 
 ---
 

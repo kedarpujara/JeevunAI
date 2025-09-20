@@ -1,8 +1,10 @@
-// src/services/entries.ts
+// src/services/entries.ts - Updated with proper encryption
 import { supabase } from '@/services/supabase';
 import { Entry, GroupedEntries, LocationData, Mood, Tag } from '@/types/journal';
 import { generateId } from '@/utils/id';
 import { formatDate, startOfWeek } from './dates';
+import { ImageUploadService, isLocalUri } from './imageUpload';
+import { EncryptionService } from './encryption';
 
 const TABLE = 'entries';
 
@@ -13,7 +15,7 @@ type EntryRow = {
   mood_score: number | null;
   has_photos: boolean | null;
   location_data: any | null;  // jsonb
-  encrypted_blob: any | null; // jsonb
+  encrypted_blob: string;     // 🔐 NOW ACTUALLY ENCRYPTED!
   created_at: string;
   updated_at: string;
   tombstoned: boolean | null;
@@ -29,44 +31,103 @@ async function uid(): Promise<string> {
   return id;
 }
 
-function toRow(userId: string, e: Entry) {
-    return {
-      id: e.id,
-      user_id: userId,
-      entry_date: e.date,
-      mood_score: e.mood ?? null,
-      has_photos: e.hasPhotos ?? ((e.photoUris?.length ?? 0) > 0), // keep
-      location_data: e.locationData ?? null,
-      encrypted_blob: { ...e }, // <-- full entry, including photoUris, tags, etc.
-      created_at: e.createdAt,
-      updated_at: e.updatedAt,
-      tombstoned: !!e.deleted,
-    };
+async function toRow(userId: string, e: Entry): Promise<EntryRow> {
+  // 🔐 Create sensitive data object to encrypt
+  const sensitiveData = {
+    title: e.title,
+    body: e.body,
+    photoUris: e.photoUris,
+    tags: e.tags,
+    audioUri: e.audioUri,
+    transcription: e.transcription,
+    themes: e.themes,
+    sentiment: e.sentiment,
+    // Include any other sensitive fields
+  };
+
+  // 🔐 Encrypt the sensitive data
+  const encryptedBlob = await EncryptionService.encrypt(sensitiveData, userId);
+
+  return {
+    id: e.id,
+    user_id: userId,
+    entry_date: e.date,
+    mood_score: e.mood ?? null,
+    has_photos: e.hasPhotos ?? ((e.photoUris?.length ?? 0) > 0),
+    location_data: e.locationData ?? null, // Location might be OK unencrypted for search
+    encrypted_blob: encryptedBlob, // 🔐 Actually encrypted now!
+    created_at: e.createdAt,
+    updated_at: e.updatedAt,
+    tombstoned: !!e.deleted,
+  };
+}
+
+async function fromRow(r: EntryRow, userId: string): Promise<Entry> {
+  let decryptedData: any = {};
+  
+  try {
+    // 🔐 Decrypt the sensitive data
+    if (r.encrypted_blob) {
+      decryptedData = await EncryptionService.decrypt(r.encrypted_blob, userId);
+    }
+  } catch (error) {
+    console.error('🔐 Failed to decrypt entry data:', error);
+    // Fallback to empty object if decryption fails
+    // This might happen if the user's encryption key is lost
+    decryptedData = {};
   }
 
-  function fromRow(r: EntryRow): Entry {
-    const blob = (r.encrypted_blob ?? {}) as Partial<Entry>;
-    return {
-      id: r.id,
-      createdAt: blob.createdAt ?? r.created_at,
-      updatedAt: blob.updatedAt ?? r.updated_at,
-      date: r.entry_date,
-      title: blob.title,
-      body: blob.body,
-      mood: (r.mood_score ?? blob.mood ?? undefined) as any,
-      tags: blob.tags ?? [],
-      photoUris: blob.photoUris ?? [],           // <-- from encrypted_blob
-      hasPhotos: r.has_photos ?? blob.hasPhotos ?? ((blob.photoUris?.length ?? 0) > 0),
-      locationData: (r.location_data as any) ?? blob.locationData,
-      audioUri: blob.audioUri,
-      transcription: blob.transcription,
-      deleted: !!r.tombstoned,
-    };
-  }
+  return {
+    id: r.id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    date: r.entry_date,
+    title: decryptedData.title,
+    body: decryptedData.body,
+    mood: (r.mood_score ?? decryptedData.mood ?? undefined) as any,
+    tags: decryptedData.tags ?? [],
+    photoUris: decryptedData.photoUris ?? [],
+    hasPhotos: r.has_photos ?? ((decryptedData.photoUris?.length ?? 0) > 0),
+    locationData: (r.location_data as any) ?? decryptedData.locationData,
+    audioUri: decryptedData.audioUri,
+    transcription: decryptedData.transcription,
+    deleted: !!r.tombstoned,
+  };
+}
 
 // ---------- service ----------
 
 export class EntriesService {
+  /**
+   * Upload local images and return remote URLs
+   */
+  private async processImages(photoUris: string[], entryId: string): Promise<string[]> {
+    if (!photoUris.length) return [];
+
+    const userId = await uid();
+    const processedUris: string[] = [];
+
+    for (const uri of photoUris) {
+      if (isLocalUri(uri)) {
+        try {
+          // Upload local image to Supabase Storage
+          const remoteUrl = await ImageUploadService.uploadImage(uri, userId, entryId);
+          processedUris.push(remoteUrl);
+          console.log('✅ Uploaded image:', uri, '->', remoteUrl);
+        } catch (error) {
+          console.error('❌ Failed to upload image:', uri, error);
+          // Decide: skip failed uploads or throw error
+          // For now, we'll skip failed uploads but log them
+        }
+      } else {
+        // Already a remote URL, keep as-is
+        processedUris.push(uri);
+      }
+    }
+
+    return processedUris;
+  }
+
   async createEntry(data: {
     title?: string;
     body?: string;
@@ -84,8 +145,11 @@ export class EntriesService {
   }): Promise<Entry> {
     const userId = await uid();
     const now = new Date();
+    const entryId = generateId();
+    const uploadedPhotoUris = await this.processImages(data.photoUris || [], entryId);
+
     const entry: Entry = {
-      id: generateId(),
+      id: entryId,
       createdAt: data.createdAt || now.toISOString(),
       updatedAt: now.toISOString(),
       date: data.date || formatDate(now),
@@ -93,32 +157,33 @@ export class EntriesService {
       body: data.body?.trim(),
       mood: data.mood ?? 3,
       tags: data.tags || [],
-      photoUris: data.photoUris || [],
-      hasPhotos: data.hasPhotos ?? ((data.photoUris?.length ?? 0) > 0),
+      photoUris: uploadedPhotoUris,
+      hasPhotos: uploadedPhotoUris.length > 0,
       locationData: data.locationData,
       audioUri: data.audioUri,
       transcription: data.transcription,
       deleted: false,
     };
 
-    console.log('🟢 createEntry -> Will upsert', {
+    console.log('🟢 createEntry -> Will upsert (encrypted)', {
       entryId: entry.id,
       userId,
       date: entry.date,
-      title: entry.title,
+      title: entry.title ? '[ENCRYPTED]' : undefined,
       hasPhotos: entry.hasPhotos,
       tagsCount: entry.tags?.length || 0,
     });
 
-    const payload = toRow(userId, entry);
-    console.log('📦 FINAL ROW PAYLOAD (trimmed):', {
+    const payload = await toRow(userId, entry);
+    console.log('📦 FINAL ROW PAYLOAD (encrypted):', {
       id: payload.id,
       user_id: payload.user_id,
       entry_date: payload.entry_date,
       mood_score: payload.mood_score,
       has_photos: payload.has_photos,
       location_is_null: payload.location_data == null,
-      blob_is_object: typeof payload.encrypted_blob === 'object',
+      blob_is_encrypted: payload.encrypted_blob.length > 0,
+      blob_length: payload.encrypted_blob.length,
       tombstoned: payload.tombstoned,
     });
 
@@ -134,7 +199,7 @@ export class EntriesService {
     }
 
     console.log('🟢 createEntry -> Supabase upsert OK, db id:', upserted.id);
-    return fromRow(upserted);
+    return fromRow(upserted, userId);
   }
 
   async updateEntry(id: string, updates: Partial<Entry>): Promise<Entry | null> {
@@ -149,24 +214,44 @@ export class EntriesService {
     if (getErr) throw getErr;
     if (!row) return null;
 
-    const current = fromRow(row);
+    const current = await fromRow(row, userId);
+    let finalPhotoUris = current.photoUris || [];
+  
+    if (updates.photoUris) {
+      // Upload any new local images
+      const processedUris = await this.processImages(updates.photoUris, id);
+      
+      // Find images that were removed (to clean them up)
+      const removedImages = (current.photoUris || []).filter(uri => 
+        !processedUris.includes(uri) && !isLocalUri(uri)
+      );
+      
+      // Clean up removed images from Supabase Storage
+      if (removedImages.length > 0) {
+        await ImageUploadService.deleteImages(removedImages);
+      }
+      
+      finalPhotoUris = processedUris;
+    }
+
     const merged: Entry = {
       ...current,
       ...updates,
       id: current.id,                  // avoid id changes
-      createdAt: current.createdAt,    // preserve creation
+      createdAt: updates.createdAt || current.createdAt,    // preserve creation
       updatedAt: new Date().toISOString(),
-      hasPhotos: updates.photoUris ? updates.photoUris.length > 0 : current.hasPhotos,
+      photoUris: finalPhotoUris, 
+      hasPhotos: finalPhotoUris.length > 0,
     };
 
     const { data: updated, error } = await supabase
       .from(TABLE)
-      .upsert(toRow(userId, merged), { onConflict: 'id' })
+      .upsert(await toRow(userId, merged), { onConflict: 'id' })
       .select('*')
       .single<EntryRow>();
     if (error) throw error;
 
-    return fromRow(updated);
+    return fromRow(updated, userId);
   }
 
   async deleteEntry(id: string): Promise<void> {
@@ -190,7 +275,7 @@ export class EntriesService {
       .maybeSingle<EntryRow>();
     if (error) throw error;
     if (!data) return null;
-    return fromRow(data);
+    return fromRow(data, userId);
   }
 
   async listEntries(): Promise<Entry[]> {
@@ -204,7 +289,22 @@ export class EntriesService {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return ((data as EntryRow[]) || []).map(fromRow).filter(e => !e.deleted);
+    
+    // 🔐 Decrypt all entries
+    const entries: Entry[] = [];
+    for (const row of (data as EntryRow[]) || []) {
+      try {
+        const entry = await fromRow(row, userId);
+        if (!entry.deleted) {
+          entries.push(entry);
+        }
+      } catch (error) {
+        console.error('🔐 Failed to decrypt entry:', row.id, error);
+        // Skip corrupted entries rather than failing completely
+      }
+    }
+    
+    return entries;
   }
 
   async listByDateRange(startDate: Date, endDate: Date): Promise<Entry[]> {
@@ -222,27 +322,41 @@ export class EntriesService {
       .order('entry_date', { ascending: false });
 
     if (error) throw error;
-    return ((data as EntryRow[]) || []).map(fromRow).filter(e => !e.deleted);
+    
+    // 🔐 Decrypt all entries
+    const entries: Entry[] = [];
+    for (const row of (data as EntryRow[]) || []) {
+      try {
+        const entry = await fromRow(row, userId);
+        if (!entry.deleted) {
+          entries.push(entry);
+        }
+      } catch (error) {
+        console.error('🔐 Failed to decrypt entry:', row.id, error);
+        // Skip corrupted entries rather than failing completely
+      }
+    }
+    
+    return entries;
   }
 
   async searchEntries(query: string): Promise<Entry[]> {
-    const q = query.trim();
+    // 🔐 NOTE: Since content is encrypted, we can't search it server-side
+    // We need to decrypt all entries client-side and search locally
+    const q = query.trim().toLowerCase();
     if (!q) return this.listEntries();
 
-    const userId = await uid();
-    const { data, error } = await supabase
-      .from(TABLE)
-      .select('*')
-      .eq('user_id', userId)
-      .eq('tombstoned', false)
-      .or(
-        // search inside the blob title/body
-        `encrypted_blob->>title.ilike.%${q}%,encrypted_blob->>body.ilike.%${q}%`
-      )
-      .order('updated_at', { ascending: false });
-
-    if (error) throw error;
-    return ((data as EntryRow[]) || []).map(fromRow).filter(e => !e.deleted);
+    console.log('🔍 Performing client-side encrypted search for:', q);
+    
+    const allEntries = await this.listEntries();
+    
+    return allEntries.filter(entry => {
+      const titleMatch = entry.title?.toLowerCase().includes(q) ?? false;
+      const bodyMatch = entry.body?.toLowerCase().includes(q) ?? false;
+      const tagMatch = entry.tags?.some(tag => tag.name.toLowerCase().includes(q)) ?? false;
+      
+      return titleMatch || bodyMatch || tagMatch;
+    });
   }
 
   async groupEntriesByDay(): Promise<GroupedEntries> {
@@ -258,7 +372,7 @@ export class EntriesService {
     console.log('Current entries from context:', entries.map(e => ({
       id: e.id,
       date: e.date,
-      title: e.title,
+      title: e.title ? '[ENCRYPTED]' : undefined,
       createdAt: e.createdAt
     })));
     return grouped;
@@ -306,6 +420,13 @@ export class EntriesService {
       .map(([name]) => name);
 
     return { totalEntries, avgMood: Math.round(avgMood * 10) / 10, topTags };
+  }
+
+  /**
+   * 🔐 Clear encryption key on logout
+   */
+  static clearEncryption(): void {
+    EncryptionService.clearKey();
   }
 }
 

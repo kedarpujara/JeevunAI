@@ -33,6 +33,29 @@ export function formatDate(date: Date | string): string {
       day: 'numeric'
     });
   };
+
+  /**
+   * Format a date to display format (e.g., "Jan 15, 2024")
+   */
+  export const formatDisplayDateNoYear = (dateString: string): string => {
+    // If it's a YYYY-MM-DD string, parse as local date
+    if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [y, m, d] = dateString.split('-').map(n => parseInt(n, 10));
+      const date = new Date(y, m - 1, d); // Local date, no timezone shift
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',        
+        month: 'long', 
+        day: 'numeric'
+      });
+    }
+    
+    // Handle ISO datetime strings normally
+    return new Date(dateString).toLocaleDateString('en-US', {
+      weekday: 'long',      
+      month: 'long',
+      day: 'numeric'
+    });
+  };
   
   /**
    * Format a date to time string (e.g., "2:30 PM")

@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../src/constants/theme';
 import { useJournal } from '../src/context/JournalContext';
-import EfficientPeriodAnalyzer, { PeriodAnalysis } from '../src/services/periodAnalyzerEfficient';
+import PeriodAnalyzer, { PeriodAnalysis } from '../src/services/periodAnalyzer';
 import { Stack } from 'expo-router';
 
 
@@ -65,7 +65,7 @@ export default function WeekReviewScreen() {
     setError(null);
 
     try {
-      const result = await EfficientPeriodAnalyzer.analyzeWeekEntries(week.startDate, week.endDate);
+      const result = await PeriodAnalyzer.analyzeWeekEntries(week.startDate, week.endDate);
       setAnalysis(result);
     } catch (err) {
       console.error('Week analysis failed:', err);

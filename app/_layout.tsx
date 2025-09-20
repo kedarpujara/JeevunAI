@@ -10,6 +10,7 @@ import { Drawer } from 'expo-router/drawer';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+export { default as resetPassword } from './reset-password';
 
 
 function AuthenticatedDrawer() {
@@ -49,6 +50,16 @@ function AuthenticatedDrawer() {
       {/* Main tabs - hidden from drawer */}
       <Drawer.Screen name="(tabs)" options={{ headerShown: false, drawerItemStyle: { display: 'none' } }} />
 
+      <Drawer.Screen 
+        name="reset-password" 
+        options={{ 
+          title: 'Reset Password', 
+          headerShown: false, 
+          drawerItemStyle: { display: 'none' },
+          swipeEnabled: false 
+        }} 
+      />
+
       {/* Auth screens - hidden from drawer */}
       {/* <Drawer.Screen name="auth/login" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="auth/signup" options={{ headerShown: false, drawerItemStyle: { display: 'none' }, swipeEnabled: false }} /> */}
@@ -60,7 +71,7 @@ function AuthenticatedDrawer() {
       <Drawer.Screen name="settings/privacy" options={{ title: 'Privacy', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/notifications" options={{ title: 'Notifications', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/help" options={{ title: 'Help & Support', headerShown: true, drawerItemStyle: { display: 'none' } }} />
-      <Drawer.Screen name="settings/billing" options={{title: 'Upgrade to Pro', headerShown: true, drawerItemStyle: { display: 'none' } }} />
+      {/* <Drawer.Screen name="settings/billing" options={{title: 'Upgrade to Pro', headerShown: true, drawerItemStyle: { display: 'none' } }} /> */}
       <Drawer.Screen name="settings/subscriptions" options={{title: 'Subscription', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/backup" options={{title: 'Backup', headerShown: true, drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="settings/export" options={{title: 'Export', headerShown: true, drawerItemStyle: { display: 'none' } }} />

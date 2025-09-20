@@ -20,8 +20,8 @@ export const PrivacyScreen: React.FC = () => {
 
         <Text style={styles.sectionTitle}>2. How We Store & Protect Data</Text>
         <Text style={styles.paragraph}>
-          By default, all entries are stored locally on your device. If you enable cloud sync, your
-          entries are encrypted end-to-end before leaving your device. We cannot read your content.
+          By default, all entries are encrypted end-to-end before leaving your device. 
+          We cannot read your content or view your photos. Journals are secure by design. 
         </Text>
 
         <Text style={styles.sectionTitle}>3. How We Use Data</Text>

@@ -1,4 +1,3 @@
-
 // UPDATE app/(tabs)/_layout.tsx - MINIMAL padding fix
 
 import { HamburgerButton } from '@/components/HamburgerButton';
@@ -43,10 +42,10 @@ export default function TabLayout() {
       <Tabs.Screen      
         name="history"
         options={{
-          title: 'History',
-          headerTitle: 'History',
+          title: 'Journal',
+          headerTitle: 'Journal',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="time-outline" size={size} color={color} />
+            <Ionicons name="book-outline" size={size} color={color} />
           ),
           headerRight: () => <HamburgerButton />,
         }}
@@ -76,8 +75,9 @@ export default function TabLayout() {
           title: 'Insights',
           headerTitle: 'AI Insights',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="sparkles-outline" size={size} color={color} />
+            <Ionicons name="analytics-outline" size={size} color={color} />
           ),
+          headerRight: () => <HamburgerButton />,
         }}
       />
     </Tabs>

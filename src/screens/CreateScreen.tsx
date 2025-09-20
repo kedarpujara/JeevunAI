@@ -1,4 +1,4 @@
-// app/create.tsx (V2 improvements)
+// app/create.tsx (V2 improvements) - Now includes edit functionality
 
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from '@gorhom/bottom-sheet';
@@ -15,7 +15,8 @@ import { useJournal } from '@/context/JournalContext';
 import { analyzeEntryWithAI } from '@/services/aiAnalyzer';
 import { getCurrentLocation } from '@/services/locationService';
 import { transcribeAudio } from '@/services/transcription';
-import { LocationData, Mood } from '@/types/journal';
+import { Entry, LocationData, Mood } from '@/types/journal';
+import { formatDate } from '@/utils/format';
 
 import ConfirmationSheet, { ConfirmationSheetRef } from '@/components/ConfirmationSheet';
 import EntryEditor from '@/components/EntryEditor';
@@ -33,7 +34,7 @@ export interface EntryData {
 
 export default function CreateScreen() {
   const router = useRouter();
-  const { refreshEntries } = useJournal();
+  const { refreshEntries, updateEntry } = useJournal();
   const { user } = useAuth();
 
   // Recording
@@ -41,6 +42,12 @@ export default function CreateScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [showTips, setShowTips] = useState(false);
+  const currentDate = formatDate(new Date());
+
+  // Edit mode state
+  const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // Editor state
   const [entryData, setEntryData] = useState<EntryData>({
@@ -65,6 +72,37 @@ export default function CreateScreen() {
   const confirmRef = useRef<ConfirmationSheetRef>(null);
   const previewOpacity = useRef(new Animated.Value(0)).current;
   const durationInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Add edit mode handler - this is what's missing!
+  const handleEditEntry = (entry: Entry) => {
+    console.log('Starting edit mode for entry:', entry.id);
+    setEditingEntry(entry);
+    setIsEditMode(true);
+    
+    // Convert Entry to EntryData format
+    const entryDate = entry.createdAt ? new Date(entry.createdAt) : new Date();
+    setEntryData({
+      content: entry.body || '',
+      title: entry.title || '',
+      mood: entry.mood,
+      photoUris: entry.photoUris || [],
+      location: entry.locationData,
+      entryDate: entryDate,
+    });
+    
+    // Open the editor
+    editorSheetRef.current?.snapToIndex(1);
+  };
+
+  // Expose the edit handler globally so other components can use it
+  useEffect(() => {
+    // Add the edit handler to the global scope so EntryDetailSheet can call it
+    (global as any).handleEditEntry = handleEditEntry;
+    
+    return () => {
+      (global as any).handleEditEntry = undefined;
+    };
+  }, []);
 
   // Animate preview
   useEffect(() => {
@@ -235,41 +273,75 @@ export default function CreateScreen() {
       return;
     }
 
+    console.log('Saving entry with date:', entryData.entryDate.toISOString());
+
     setIsSaving(true);
     try {
-      let ai = { title: entryData.title.trim(), tags: [] as string[], themes: [] as string[], sentiment: null as any };
-      try {
-        ai = await analyzeEntryWithAI(
-          content,
-          entryData.mood,
-          entryData.photoUris.length > 0,
-          entryData.location
-        );
-      } catch {}
+      if (isEditMode && editingEntry) {
+        console.log('Updating with photos:', entryData.photoUris);
+        // Update existing entry
+        const entryDate = entryData.entryDate;
+        const dateStr = entryDate.toISOString().split('T')[0];
+        const createdAtStr = entryDate.toISOString();
 
-      const finalTitle = entryData.title.trim() || ai.title || 'Journal Entry';
-      const dateStr = entryData.entryDate.toISOString().split('T')[0];
+        console.log('Updating entry with dateStr:', dateStr, 'createdAt:', createdAtStr);
 
-      await (await import('@/services/entries')).entriesService.createEntry({
-        title: finalTitle,
-        body: content,
-        mood: entryData.mood,
-        tags: (ai.tags || []).map((name) => ({ id: name, name })),
-        photoUris: entryData.photoUris,
-        hasPhotos: entryData.photoUris.length > 0,
-        locationData: entryData.location,
-        sentiment: ai.sentiment,
-        themes: ai.themes,
-        date: dateStr,
-        createdAt: entryData.entryDate.toISOString(),
-      });
+        await updateEntry(editingEntry.id, {
+          title: entryData.title.trim() || editingEntry.title,
+          body: content,
+          mood: entryData.mood,
+          photoUris: entryData.photoUris,
+          hasPhotos: entryData.photoUris.length > 0,
+          locationData: entryData.location,
+          date: dateStr,
+          createdAt: createdAtStr,
+        });
 
-      refreshEntries().catch(() => {});
+        // Reset edit mode
+        setIsEditMode(false);
+        setEditingEntry(null);
+        
+      } else {
+        // Create new entry
+        let ai = { title: entryData.title.trim(), tags: [] as string[], themes: [] as string[], sentiment: null as any };
+        try {
+          ai = await analyzeEntryWithAI(
+            content,
+            entryData.mood,
+            entryData.photoUris.length > 0,
+            entryData.location
+          );
+        } catch { }
+
+        const finalTitle = entryData.title.trim() || ai.title || 'Journal Entry';
+
+        const entryDate = entryData.entryDate;
+        const dateStr = entryDate.toISOString().split('T')[0];
+        const createdAtStr = entryDate.toISOString();
+
+        console.log('Creating entry with dateStr:', dateStr, 'createdAt:', createdAtStr);
+
+        await (await import('@/services/entries')).entriesService.createEntry({
+          title: finalTitle,
+          body: content,
+          mood: entryData.mood,
+          tags: (ai.tags || []).map((name) => ({ id: name, name })),
+          photoUris: entryData.photoUris,
+          hasPhotos: entryData.photoUris.length > 0,
+          locationData: entryData.location,
+          sentiment: ai.sentiment,
+          themes: ai.themes,
+          date: dateStr,
+          createdAt: createdAtStr,
+        });
+      }
+
+      refreshEntries().catch(() => { });
       editorSheetRef.current?.close();
 
       requestAnimationFrame(() => {
         confirmRef.current?.present({
-          title: 'Saved',
+          title: isEditMode ? 'Updated' : 'Saved',
           onDone: () => {
             confirmRef.current?.dismiss();
             router.replace('/history');
@@ -277,6 +349,7 @@ export default function CreateScreen() {
         });
       });
 
+      // Reset state
       setEntryData({
         content: '',
         title: '',
@@ -286,6 +359,9 @@ export default function CreateScreen() {
         entryDate: new Date(),
       });
       setHasLocationConfirmation(false);
+      setIsEditMode(false);
+      setEditingEntry(null);
+      
     } catch (e: any) {
       console.error('Save error:', e);
       Alert.alert('Save Error', e?.message ?? 'Could not save entry.');
@@ -294,11 +370,22 @@ export default function CreateScreen() {
     }
   };
 
-  const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const handleCancel = () => {
+    if (isEditMode) {
+      setIsEditMode(false);
+      setEditingEntry(null);
+      setEntryData({
+        content: '',
+        title: '',
+        mood: undefined,
+        photoUris: [],
+        location: undefined,
+        entryDate: new Date(),
+      });
+    }
+  };
 
-  // ---- derived UI state for the subtle "added" pills
-  const hasLocation = !!entryData.location;
-  const photoCount = entryData.photoUris.length;
+  const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   return (
     <View style={styles.container}>
@@ -326,9 +413,10 @@ export default function CreateScreen() {
         {hasContent && (
           <EntryPreview
             title={entryData.title}
-            content={entryData.content}            
+            content={entryData.content}
             opacity={previewOpacity}
             onPress={() => editorSheetRef.current?.snapToIndex(1)}
+            currentDate={currentDate}
           />
         )}
 
@@ -360,33 +448,42 @@ export default function CreateScreen() {
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.action} onPress={() => router.push('/history')}>
-            <Ionicons name="time-outline" size={22} color={theme.colors.text} />
-            <Text style={styles.actionLabel}>History</Text>
+          <TouchableOpacity
+            style={[styles.action, showTips && styles.actionActive]}
+            onPress={() => setShowTips(!showTips)}
+          >
+            <Ionicons
+              name="sparkles-outline"
+              size={22}
+              color={showTips ? theme.colors.primary : theme.colors.text}
+            />
+            <Text style={[styles.actionLabel, showTips && styles.actionLabelActive]}>Tips</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Quick Tips card */}
-        <View style={styles.tipsCard}>
-          <View style={styles.tipsHeader}>
-            <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary} />
-            <Text style={styles.tipsTitle}>Quick tips</Text>
-          </View>
+        {/* Quick Tips card - only show when showTips is true */}
+        {showTips && (
+          <View style={styles.tipsCard}>
+            <View style={styles.tipsHeader}>
+              <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary} />
+              <Text style={styles.tipsTitle}>Quick tips</Text>
+            </View>
 
-          <View style={styles.tipRow}>
-            <Ionicons name="help-circle-outline" size={16} color={theme.colors.textSecondary} />
-            <Text style={styles.tipText}>
-              <Text style={styles.tipEmph}>Five Ws</Text>: Who, What, When, Where, Why
-            </Text>
-          </View>
+            <View style={styles.tipRow}>
+              <Ionicons name="help-circle-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.tipText}>
+                <Text style={styles.tipEmph}>Five Ws</Text>: Who, What, When, Where, Why
+              </Text>
+            </View>
 
-          <View style={styles.tipRow}>
-            <Ionicons name="color-palette-outline" size={16} color={theme.colors.textSecondary} />
-            <Text style={styles.tipText}>
-              <Text style={styles.tipEmph}>Go Sensory</Text>: emotions 😊, smells 👃, sounds 🎧
-            </Text>
+            <View style={styles.tipRow}>
+              <Ionicons name="color-palette-outline" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.tipText}>
+                <Text style={styles.tipEmph}>Go Sensory</Text>: emotions 😊, smells 👃, sounds 🎧
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
       </ScrollView>
 
       {/* Entry editor sheet - Updated with better snap points */}
@@ -395,6 +492,7 @@ export default function CreateScreen() {
         entryData={entryData}
         onUpdateEntry={setEntryData}
         onSave={handleSave}
+        onCancel={handleCancel}
         onPickImage={handlePickImage}
         onTakePhoto={handleTakePhoto}
         onRemovePhoto={handleRemovePhoto}
@@ -404,6 +502,7 @@ export default function CreateScreen() {
         isSaving={isSaving}
         isTranscribing={isTranscribing}
         hasContent={hasContent}
+        isEditing={isEditMode}
       />
 
       {/* Confirmation sheet (modal) */}
@@ -419,10 +518,9 @@ const styles = StyleSheet.create({
 
   dateHeader: { alignItems: 'center', marginTop: theme.spacing.xl, marginBottom: theme.spacing.lg },
   dateHeaderTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
-  
+
   // Enhanced date background styling
   dateBackground: {
-    // backgroundColor: '#6366F1', // Purple background
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     borderRadius: theme.radius.lg,
@@ -432,13 +530,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-  
-  dateText: { 
-    ...theme.typography.body, 
-    color: theme.colors.black, // White text on purple background
+
+  dateText: {
+    ...theme.typography.body,
+    color: theme.colors.black,
     fontWeight: '600',
-    textAlign: 'center', 
-    flex: 1 
+    textAlign: 'center',
+    flex: 1
   },
 
   promptText: {
@@ -456,8 +554,24 @@ const styles = StyleSheet.create({
     gap: theme.spacing.xl,
     marginTop: theme.spacing.lg,
   },
-  action: { alignItems: 'center', padding: theme.spacing.sm },
-  actionLabel: { ...theme.typography.caption, color: theme.colors.textSecondary, marginTop: 4 },
+  action: {
+    alignItems: 'center',
+    padding: theme.spacing.sm,
+    minHeight: 60,
+  },
+  actionLabel: {
+    ...theme.typography.caption,
+    color: theme.colors.textSecondary,
+    marginTop: 4
+  },
+  actionActive: {
+    backgroundColor: theme.colors.primary + '15',
+    borderRadius: theme.radius.md,
+  },
+  actionLabelActive: {
+    color: theme.colors.primary,
+    fontWeight: '600',
+  },
 
   // subtle status pills shown only when something is attached
   statusRow: {
@@ -478,7 +592,7 @@ const styles = StyleSheet.create({
     borderColor: '#cdeed2',
   },
   pillText: { ...theme.typography.caption, color: '#2e7d32', fontWeight: '600' },
-  
+
   tipsCard: {
     marginTop: theme.spacing.xxxxl,
     marginBottom: theme.spacing.xxxxl,

@@ -42,7 +42,7 @@ export const useJournalStats = () => {
     const totalDays = uniqueDays.size;
 
     // Calculate streaks
-    const { currentStreak, longestStreak } = calculateStreaks(Array.from(uniqueDays).sort());
+    const { currentStreak, longestStreak } = calculateStreaks(Array.from(uniqueDays));
 
     setStats({
       totalEntries: entries.length,
@@ -53,49 +53,70 @@ export const useJournalStats = () => {
   };
 
   const calculateStreaks = (dates: string[]): { currentStreak: number; longestStreak: number } => {
-    if (dates.length === 0) return { currentStreak: 0, longestStreak: 0 };
+    if (dates.length === 0) {
+      return { currentStreak: 0, longestStreak: 0 };
+    }
 
+    // Sort dates in descending order (most recent first)
+    const sortedDates = dates.sort((a, b) => b.localeCompare(a));
+    
+    // ===== CURRENT STREAK CALCULATION =====
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayString = today.toISOString().split('T')[0];
     
     let currentStreak = 0;
-    let longestStreak = 0;
-    let tempStreak = 1;
 
-    // Check if the most recent entry is today or yesterday for current streak
-    const mostRecentDate = new Date(dates[dates.length - 1]);
-    mostRecentDate.setHours(0, 0, 0, 0);
-    
-    const daysDiff = Math.floor((today.getTime() - mostRecentDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // If last entry is today or yesterday, we might have a current streak
-    const hasCurrentStreak = daysDiff <= 1;
+    if (sortedDates.includes(todayString)) {
+      currentStreak += 1;
+    }
 
-    for (let i = dates.length - 1; i > 0; i--) {
-      const currentDate = new Date(dates[i]);
-      const prevDate = new Date(dates[i - 1]);
+      // Work backwards from day before yesterday
+    let checkDate = new Date(today);
+    checkDate.setDate(checkDate.getDate() - 1);
+    console.log("starting date", checkDate);
+    
+    while (true) {
+      const checkDateString = checkDate.toISOString().split('T')[0];
       
-      currentDate.setHours(0, 0, 0, 0);
-      prevDate.setHours(0, 0, 0, 0);
-      
-      const diff = Math.floor((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
-      
-      if (diff === 1) {
-        tempStreak++;
+      if (sortedDates.includes(checkDateString)) {
+        currentStreak++;
+        checkDate.setDate(checkDate.getDate() - 1);
       } else {
-        if (hasCurrentStreak && i === dates.length - 1) {
-          currentStreak = tempStreak;
-        }
-        longestStreak = Math.max(longestStreak, tempStreak);
-        tempStreak = 1;
+        break; // Gap found, streak ends
+      }      
+    }
+  
+    
+    // ===== LONGEST STREAK CALCULATION =====
+    let longestStreak = 1; // At least one day if we have any dates
+    let currentLongestStreak = 1;
+    
+    // If only one date, longest streak is 1
+    if (sortedDates.length === 1) {
+      return { currentStreak, longestStreak: 1 };
+    }
+    
+    // Check all consecutive date sequences
+    for (let i = 0; i < sortedDates.length - 1; i++) {
+      const currentDate = new Date(sortedDates[i]);
+      const nextDate = new Date(sortedDates[i + 1]);
+      
+      // Calculate difference in milliseconds, then convert to days
+      const timeDiff = currentDate.getTime() - nextDate.getTime();
+      const daysDiff = Math.round(timeDiff / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff === 1) {
+        // Consecutive days - extend current streak
+        currentLongestStreak++;
+      } else {
+        // Gap found - save current streak if it's the longest, then reset
+        longestStreak = Math.max(longestStreak, currentLongestStreak);
+        currentLongestStreak = 1;
       }
     }
-
-    // Final check for streaks
-    if (hasCurrentStreak && currentStreak === 0) {
-      currentStreak = tempStreak;
-    }
-    longestStreak = Math.max(longestStreak, tempStreak);
+    
+    // Don't forget to check the final streak after the loop
+    longestStreak = Math.max(longestStreak, currentLongestStreak);
 
     return { currentStreak, longestStreak };
   };

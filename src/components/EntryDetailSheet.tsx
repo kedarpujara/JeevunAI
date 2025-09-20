@@ -1,7 +1,7 @@
-// Update your EntryDetailSheet component to include edit functionality
+// components/EntryDetailSheet.tsx - Based on your working version with delete added
 
-import React, { forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image } from 'react-native';
+import React, { forwardRef, useImperativeHandle, useRef, useCallback, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, Modal } from 'react-native';
 import { BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/constants/theme';
@@ -16,12 +16,14 @@ export interface EntryDetailSheetRef {
 interface EntryDetailSheetProps {
   entry: Entry | null;
   onDismiss: () => void;
-  onEdit?: (entry: Entry) => void; // New prop for edit callback
+  onEdit?: (entry: Entry) => void;
+  onDelete?: (entry: Entry) => void;
 }
 
 const EntryDetailSheet = forwardRef<EntryDetailSheetRef, EntryDetailSheetProps>(
-  ({ entry, onDismiss, onEdit }, ref) => {
+  ({ entry, onDismiss, onEdit, onDelete }, ref) => {
     const bottomSheetRef = useRef<BottomSheetModal>(null);
+    const [viewingPhoto, setViewingPhoto] = useState<string | null>(null);
 
     useImperativeHandle(ref, () => ({
       present: () => bottomSheetRef.current?.present(),
@@ -35,118 +37,167 @@ const EntryDetailSheet = forwardRef<EntryDetailSheetRef, EntryDetailSheetProps>(
       }
     }, [entry, onEdit]);
 
+    const handleDelete = useCallback(() => {
+      if (entry && onDelete) {
+        onDelete(entry);
+      }
+    }, [entry, onDelete]);
+
+    const handlePhotoPress = useCallback((photoUri: string) => {
+      setViewingPhoto(photoUri);
+    }, []);
+
+    const closePhotoViewer = useCallback(() => {
+      setViewingPhoto(null);
+    }, []);
+
     if (!entry) return null;
 
     return (
-      <BottomSheetModal
-        ref={bottomSheetRef}
-        snapPoints={['85%']}
-        onDismiss={onDismiss}
-        backgroundStyle={styles.background}
-        handleIndicatorStyle={styles.indicator}
-      >
-        <View style={styles.container}>
-          {/* Header with Edit button */}
-          <View style={styles.header}>
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>Entry Details</Text>
-              <Text style={styles.headerDate}>
-                {formatDisplayDate(entry.date)} • {formatTime(entry.createdAt)}
-              </Text>
+      <>
+        <BottomSheetModal
+          ref={bottomSheetRef}
+          snapPoints={['85%']}
+          onDismiss={onDismiss}
+          backgroundStyle={styles.background}
+          handleIndicatorStyle={styles.indicator}
+        >
+          <View style={styles.container}>
+            {/* Header with Edit and Delete buttons */}
+            <View style={styles.header}>
+              <View style={styles.headerInfo}>
+                <Text style={styles.headerTitle}>Entry Details</Text>
+                <Text style={styles.headerDate}>
+                  {formatDisplayDate(entry.date)} • {formatTime(entry.createdAt)}
+                </Text>
+              </View>
+              
+              <View style={styles.actionButtons}>
+                {onDelete && (
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.deleteButton]} 
+                    onPress={handleDelete}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={20} color={theme.colors.danger} />
+                  </TouchableOpacity>
+                )}
+                
+                {onEdit && (
+                  <TouchableOpacity 
+                    style={[styles.actionButton, styles.editButton]} 
+                    onPress={handleEdit}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="pencil" size={20} color={theme.colors.primary} />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
-            
-            {onEdit && (
-              <TouchableOpacity 
-                style={styles.editButton} 
-                onPress={handleEdit}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="pencil" size={20} color={theme.colors.primary} />
-              </TouchableOpacity>
-            )}
-          </View>
 
-          <BottomSheetScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-            {/* Title */}
-            {entry.title && (
-              <View style={styles.section}>
-                <Text style={styles.title}>{entry.title}</Text>
-              </View>
-            )}
-
-            {/* Content */}
-            {entry.body && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>ENTRY</Text>
-                <Text style={styles.content}>{entry.body}</Text>
-              </View>
-            )}
-
-            {/* Photos */}
-            {entry.photoUris && entry.photoUris.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Photos ({entry.photoUris.length})</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
-                  {entry.photoUris.map((uri, index) => (
-                    <Image key={index} source={{ uri }} style={styles.photo} />
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* Location */}
-            {entry.locationData && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Location</Text>
-                <View style={styles.locationContainer}>
-                  <Ionicons name="location" size={16} color={theme.colors.primary} />
-                  <Text style={styles.locationText}>
-                    {entry.locationData.place?.name || 
-                     entry.locationData.address?.formattedAddress ||
-                     `${entry.locationData.address?.city}, ${entry.locationData.address?.region}` ||
-                     'Location recorded'}
-                  </Text>
+            <BottomSheetScrollView 
+              style={styles.scrollView} 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 100 }}
+            >
+              {/* Title */}
+              {entry.title && (
+                <View style={styles.section}>
+                  <Text style={styles.title}>{entry.title}</Text>
                 </View>
-              </View>
-            )}
+              )}
 
-            {/* Tags */}
-            {entry.tags && entry.tags.length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Tags</Text>
-                <View style={styles.tagsContainer}>
-                  {entry.tags.map((tag, index) => (
-                    <View key={index} style={styles.tag}>
-                      <Text style={styles.tagText}>#{tag.name}</Text>
-                    </View>
-                  ))}
+              {/* Content */}
+              {entry.body && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>ENTRY</Text>
+                  <Text style={styles.content}>{entry.body}</Text>
                 </View>
-              </View>
-            )}
+              )}
 
-            {/* Mood */}
-            {/* {entry.mood && (
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>Mood</Text>
-                <View style={styles.moodContainer}>
-                  <Text style={styles.moodValue}>{entry.mood}/5</Text>
-                  <View style={styles.moodBar}>
-                    {[1, 2, 3, 4, 5].map((level) => (
-                      <View
-                        key={level}
-                        style={[
-                          styles.moodBarSegment,
-                          { backgroundColor: level <= entry.mood! ? theme.colors.primary : theme.colors.border }
-                        ]}
-                      />
+              {/* Photos */}
+              {entry.photoUris && entry.photoUris.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Photos ({entry.photoUris.length})</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
+                    {entry.photoUris.map((uri, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        onPress={() => handlePhotoPress(uri)}
+                        activeOpacity={0.8}
+                      >
+                        <Image source={{ uri }} style={styles.photo} />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Location */}
+              {entry.locationData && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Location</Text>
+                  <View style={styles.locationContainer}>
+                    <Ionicons name="location" size={16} color={theme.colors.primary} />
+                    <Text style={styles.locationText}>
+                      {entry.locationData.place?.name || 
+                       entry.locationData.address?.formattedAddress ||
+                       `${entry.locationData.address?.city}, ${entry.locationData.address?.region}` ||
+                       'Location recorded'}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Tags */}
+              {entry.tags && entry.tags.length > 0 && (
+                <View style={[styles.section, styles.lastSection]}>
+                  <Text style={styles.sectionLabel}>Tags</Text>
+                  <View style={styles.tagsContainer}>
+                    {entry.tags.map((tag, index) => (
+                      <View key={index} style={styles.tag}>
+                        <Text style={styles.tagText}>#{tag.name}</Text>
+                      </View>
                     ))}
                   </View>
                 </View>
-              </View>
-            )} */}
-          </BottomSheetScrollView>
-        </View>
-      </BottomSheetModal>
+              )}
+            </BottomSheetScrollView>
+          </View>
+        </BottomSheetModal>
+
+        {/* Photo viewer modal */}
+        <Modal
+          visible={!!viewingPhoto}
+          transparent
+          animationType="fade"
+          onRequestClose={closePhotoViewer}
+        >
+          <View style={styles.photoViewerOverlay}>
+            <TouchableOpacity
+              style={styles.photoViewerCloseButton}
+              onPress={closePhotoViewer}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            >
+              <Ionicons name="close" size={32} color="white" />
+            </TouchableOpacity>
+            
+            {viewingPhoto && (
+              <TouchableOpacity
+                style={styles.photoViewerImageContainer}
+                onPress={closePhotoViewer}
+                activeOpacity={0.9}
+              >
+                <Image
+                  source={{ uri: viewingPhoto }}
+                  style={styles.photoViewerImage}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        </Modal>
+      </>
     );
   }
 );
@@ -163,6 +214,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl,
   },
   header: {
     flexDirection: 'row',
@@ -186,19 +238,33 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.xs,
   },
-  editButton: {
+  actionButtons: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  actionButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: theme.colors.primary + '15',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  editButton: {
+    backgroundColor: theme.colors.primary + '15',
+  },
+  deleteButton: {
+    backgroundColor: theme.colors.danger + '15',
+  },
   scrollView: {
     flex: 1,
+    marginBottom: theme.spacing.xl,
   },
   section: {
     marginBottom: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
+  },
+  lastSection: {
+    marginBottom: theme.spacing.xxl * 2,
   },
   sectionLabel: {
     ...theme.typography.caption,
@@ -255,26 +321,34 @@ const styles = StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '500',
   },
-  moodContainer: {
-    flexDirection: 'row',
+  photoViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: theme.spacing.md,
   },
-  moodValue: {
-    ...theme.typography.h3,
-    color: theme.colors.primary,
-    fontWeight: '700',
-    minWidth: 40,
+  photoViewerCloseButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 22,
   },
-  moodBar: {
-    flexDirection: 'row',
-    gap: 4,
+  photoViewerImageContainer: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
   },
-  moodBarSegment: {
-    height: 8,
-    flex: 1,
-    borderRadius: 4,
+  photoViewerImage: {
+    width: '90%',
+    height: '80%',
+    borderRadius: theme.radius.lg,
   },
 });
 

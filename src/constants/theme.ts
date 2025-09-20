@@ -45,6 +45,16 @@ export const theme = {
         fontWeight: '600' as const,
         letterSpacing: -0.3,
       },
+      h3: { 
+        fontSize: 18, 
+        fontWeight: '600' as const,
+        letterSpacing: -0.2,
+      },
+      h4: { 
+        fontSize: 14, 
+        fontWeight: '500' as const,
+        letterSpacing: -0.2,
+      },
       body: { 
         fontSize: 16, 
         fontWeight: '400' as const, 

@@ -43,7 +43,7 @@ const menuItems: MenuItem[] = [
 
   // Account & Billing
   // { id: 'sep3', separator: true, label: '', icon: 'cube' },
-  { id: 'billing', label: 'Upgrade', icon: 'card-outline', route: '/settings/billing', badge: 'PRO' },
+  // { id: 'billing', label: 'Upgrade', icon: 'card-outline', route: '/settings/billing', badge: 'PRO' },
   
   // { id: 'subscription', label: 'Subscription', icon: 'star-outline', route: '/settings/subscriptions' },
 

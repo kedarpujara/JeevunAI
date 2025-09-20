@@ -1,7 +1,7 @@
-// app/day-detail.tsx
+// app/day-detail.tsx - Based on your working version with fixes
 
 import React, { useCallback, useRef, useState } from 'react';
-import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View, Modal, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
@@ -14,13 +14,19 @@ import EntryDetailSheet, { EntryDetailSheetRef } from '../components/EntryDetail
 import EntryEditor, { EntryEditorRef } from '../components/EntryEditor';
 import { useJournal } from '../context/JournalContext';
 import { EntryData } from './CreateScreen';
+import { entriesService } from '../services/entries'; // ✅ Add this import
+import PeriodAnalyzer from '../services/periodAnalyzer'; // ✅ Add this import
+import * as ImagePicker from 'expo-image-picker';
+import { getCurrentLocation } from '../services/locationService';
+
+
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export default function DayDetailScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { updateEntry } = useJournal();
+  const { updateEntry, deleteEntry } = useJournal(); // ✅ Add deleteEntry back
 
-  // Parse the entries data from params
   const entries: Entry[] = params.entriesData
     ? JSON.parse(params.entriesData as string)
     : [];
@@ -30,6 +36,10 @@ export default function DayDetailScreen() {
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [entryData, setEntryData] = useState<EntryData | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false); // ✅ Add deletion loading
+  const [viewingPhoto, setViewingPhoto] = useState<string | null>(null); // ✅ Add photo viewer
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+
 
   const detailSheetRef = useRef<EntryDetailSheetRef>(null);
   const editorSheetRef = useRef<EntryEditorRef>(null);
@@ -44,10 +54,102 @@ export default function DayDetailScreen() {
     setSelectedEntry(null);
   }, []);
 
-  const handleEdit = useCallback((entry: Entry) => {
-    setEditingEntry(entry);
+  // ✅ Add photo handling
+  const handlePhotoPress = useCallback((photoUri: string) => {
+    setViewingPhoto(photoUri);
+  }, []);
+
+  const closePhotoViewer = useCallback(() => {
+    setViewingPhoto(null);
+  }, []);
+
+  const handlePickImage = useCallback(async () => {
+    if (!entryData) return;
     
-    // Convert Entry to EntryData format
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Please allow photo library access.');
+      return;
+    }
+    
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      quality: 0.8,
+      base64: false,
+    });
+    
+    if (!result.canceled && result.assets) {
+      const newPhotos = result.assets.map((a) => a.uri);
+      setEntryData({
+        ...entryData,
+        photoUris: [...entryData.photoUris, ...newPhotos].slice(0, 5),
+      });
+    }
+  }, [entryData]);
+  
+  const handleTakePhoto = useCallback(async () => {
+    if (!entryData) return;
+    
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Please allow camera access.');
+      return;
+    }
+    
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: false });
+    if (!result.canceled && result.assets?.[0]) {
+      setEntryData({
+        ...entryData,
+        photoUris: [...entryData.photoUris, result.assets[0].uri].slice(0, 5),
+      });
+    }
+  }, [entryData]);
+  
+  const handleRemovePhoto = useCallback((index: number) => {
+    if (!entryData) return;
+    
+    setEntryData({
+      ...entryData,
+      photoUris: entryData.photoUris.filter((_, i) => i !== index),
+    });
+  }, [entryData]);
+  
+  const handleGetLocation = useCallback(async () => {
+    if (!entryData) return;
+    
+    setIsGettingLocation(true);
+    try {
+      const loc = await getCurrentLocation();
+      if (loc) {
+        setEntryData({
+          ...entryData,
+          location: loc,
+        });
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to get location.');
+    } finally {
+      setIsGettingLocation(false);
+    }
+  }, [entryData]);
+  
+  const handleRemoveLocation = useCallback(() => {
+    if (!entryData) return;
+    
+    setEntryData({
+      ...entryData,
+      location: undefined,
+    });
+  }, [entryData]);
+
+  // ✅ Fix edit flow - close detail sheet first
+  const handleEdit = useCallback((entry: Entry) => {
+    // Close detail sheet first
+    detailSheetRef.current?.dismiss?.();
+    
+    // Set up entry data
+    setEditingEntry(entry);
     const editData: EntryData = {
       content: entry.body || '',
       title: entry.title || '',
@@ -56,15 +158,52 @@ export default function DayDetailScreen() {
       location: entry.locationData,
       entryDate: new Date(entry.createdAt),
     };
-    
     setEntryData(editData);
-    requestAnimationFrame(() => editorSheetRef.current?.snapToIndex?.(1));
+    
+    // Small delay then open editor
+    setTimeout(() => {
+      editorSheetRef.current?.snapToIndex?.(1);
+    }, 300);
   }, []);
+
+  // ✅ Add delete handler with loading
+  const handleDelete = useCallback((entry: Entry) => {
+    Alert.alert(
+      'Delete Entry',
+      'Are you sure you want to delete this entry? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setIsDeleting(true);
+            try {
+              await deleteEntry(entry.id);
+              closeDetails();
+              
+              if (entries.length === 1) {
+                router.back();
+              } else {
+                router.back();
+              }
+            } catch (error) {
+              console.error('Failed to delete entry:', error);
+              Alert.alert('Error', 'Failed to delete entry. Please try again.');
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [deleteEntry, entries.length, router, closeDetails]);
 
   const handleSaveEdit = useCallback(async () => {
     if (!editingEntry || !entryData) return;
 
     setIsSaving(true);
+    console.log("PHOTOS: ", entryData.photoUris);
     try {
       const updates: Partial<Entry> = {
         title: entryData.title.trim() || undefined,
@@ -72,17 +211,16 @@ export default function DayDetailScreen() {
         mood: entryData.mood,
         photoUris: entryData.photoUris,
         locationData: entryData.location,
-        date: entryData.entryDate.toISOString().split('T')[0],
+        date: `${entryData.entryDate.getFullYear()}-${String(entryData.entryDate.getMonth() + 1).padStart(2, '0')}-${String(entryData.entryDate.getDate()).padStart(2, '0')}`,
+        createdAt: entryData.entryDate.toISOString(),
       };
 
       await updateEntry(editingEntry.id, updates);
       
-      // Close editor and reset state
       editorSheetRef.current?.close?.();
       setEditingEntry(null);
       setEntryData(null);
       
-      // Refresh the screen data
       router.back();
       
     } catch (error) {
@@ -98,25 +236,33 @@ export default function DayDetailScreen() {
     setEntryData(null);
   }, []);
 
+  // ✅ Add date formatting function
+  const formatDateWithDayOfWeek = (dateString: string) => {
+    const date = new Date(dateString + 'T00:00:00.000');
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'long', 
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
   const renderEntryItem = ({ item: entry, index }: { item: Entry; index: number }) => {
     const firstPhoto = entry.photoUris && entry.photoUris.length > 0 ? entry.photoUris[0] : null;
     const preview = entry.body?.substring(0, 140) + '...' || 'No content available';
 
     return (
       <View style={styles.entryContainer}>
-        {/* Timeline elements */}
         <View style={styles.timelineElements}>
           <View style={styles.timelineDot} />
           {index < entries.length - 1 && <View style={styles.timelineLine} />}
         </View>
 
-        {/* Entry card */}
         <TouchableOpacity
           style={styles.entryCard}
           onPress={() => presentDetails(entry)}
           activeOpacity={0.7}
         >
-          {/* Time header */}
           <View style={styles.entryHeader}>
             <View style={styles.timeContainer}>
               <Ionicons name="time-outline" size={14} color={theme.colors.textSecondary} />
@@ -124,13 +270,20 @@ export default function DayDetailScreen() {
             </View>
           </View>
 
-          {/* Main content */}
           <View style={styles.entryContent}>
-            {/* Image section */}
             <View style={styles.entryImageContainer}>
               {firstPhoto ? (
                 <View style={styles.imageWrapper}>
-                  <Image source={{ uri: firstPhoto }} style={styles.entryImage} />
+                  {/* ✅ Add photo press handling */}
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handlePhotoPress(firstPhoto);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Image source={{ uri: firstPhoto }} style={styles.entryImage} />
+                  </TouchableOpacity>
                   {entry.photoUris && entry.photoUris.length > 1 && (
                     <View style={styles.photoCountBadge}>
                       <Text style={styles.photoCountText}>+{entry.photoUris.length - 1}</Text>
@@ -144,14 +297,10 @@ export default function DayDetailScreen() {
               )}
             </View>
 
-            {/* Text content */}
             <View style={styles.entryTextContent}>
               {entry.title && (
                 <Text style={styles.entryTitle}>{entry.title}</Text>
               )}
-              <Text style={styles.entryPreview}>{preview}</Text>
-
-              {/* Location */}
               {entry.locationData && (
                 <View style={styles.locationContainer}>
                   <Ionicons name="location-outline" size={12} color={theme.colors.textSecondary} />
@@ -162,6 +311,7 @@ export default function DayDetailScreen() {
                   </Text>
                 </View>
               )}
+              <Text style={styles.entryPreview}>{preview}</Text>              
             </View>
           </View>
         </TouchableOpacity>
@@ -173,7 +323,6 @@ export default function DayDetailScreen() {
     <BottomSheetModalProvider>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -184,13 +333,23 @@ export default function DayDetailScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{formatDisplayDate(date)}</Text>
+            {/* ✅ Use better date formatting */}
+            <Text style={styles.headerTitle}>{formatDateWithDayOfWeek(date)}</Text>
           </View>
 
           <View style={styles.headerSpacer} />
         </View>
 
-        {/* Entries List with Timeline */}
+        {/* ✅ Add loading overlay for deletion */}
+        {isDeleting && (
+          <View style={styles.loadingOverlay}>
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+              <Text style={styles.loadingText}>Deleting entry...</Text>
+            </View>
+          </View>
+        )}
+
         <View style={styles.listContainer}>
           <FlatList
             data={entries}
@@ -201,15 +360,15 @@ export default function DayDetailScreen() {
           />
         </View>
 
-        {/* Entry Detail Sheet */}
+        {/* ✅ Add delete prop */}
         <EntryDetailSheet
           ref={detailSheetRef}
           entry={selectedEntry}
           onDismiss={closeDetails}
           onEdit={handleEdit}
+          onDelete={handleDelete}
         />
 
-        {/* Entry Editor Sheet for editing */}
         {entryData && (
           <EntryEditor
             ref={editorSheetRef}
@@ -219,16 +378,48 @@ export default function DayDetailScreen() {
             onCancel={handleCancelEdit}
             isSaving={isSaving}
             isEditing={true}
-            onPickImage={() => {}}
-            onTakePhoto={() => {}}
-            onRemovePhoto={() => {}}
-            onGetLocation={() => {}}
-            onRemoveLocation={() => {}}
-            isGettingLocation={false}
+            onPickImage={handlePickImage}        // ✅ Real handler
+            onTakePhoto={handleTakePhoto}        // ✅ Real handler  
+            onRemovePhoto={handleRemovePhoto}    // ✅ Real handler
+            onGetLocation={handleGetLocation}    // ✅ Real handler
+            onRemoveLocation={handleRemoveLocation} // ✅ Real handler
+            isGettingLocation={isGettingLocation}             
             isTranscribing={false}
             hasContent={true}
           />
         )}
+
+        {/* ✅ Add photo viewer modal */}
+        <Modal
+          visible={!!viewingPhoto}
+          transparent
+          animationType="fade"
+          onRequestClose={closePhotoViewer}
+        >
+          <View style={styles.photoViewerOverlay}>
+            <TouchableOpacity
+              style={styles.photoViewerCloseButton}
+              onPress={closePhotoViewer}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+            >
+              <Ionicons name="close" size={32} color="white" />
+            </TouchableOpacity>
+            
+            {viewingPhoto && (
+              <TouchableOpacity
+                style={styles.photoViewerImageContainer}
+                onPress={closePhotoViewer}
+                activeOpacity={0.9}
+              >
+                <Image
+                  source={{ uri: viewingPhoto }}
+                  style={styles.photoViewerImage}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        </Modal>
       </View>
     </BottomSheetModalProvider>
   );
@@ -261,17 +452,40 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     ...theme.typography.h2,
-    color: theme.colors.text,
+    color: theme.colors.black, // ✅ Keep purple color
     fontWeight: '700',
-  },
-  headerSubtitle: {
-    ...theme.typography.caption,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing.xs,
+    textAlign: 'center',
+    fontSize: 18,
   },
   headerSpacer: {
     width: 40,
   },
+  
+  // ✅ Add loading overlay styles
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingContainer: {
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.xl,
+    borderRadius: theme.radius.lg,
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  loadingText: {
+    ...theme.typography.body,
+    color: theme.colors.text,
+    fontWeight: '500',
+  },
+  
   listContainer: {
     flex: 1,
     position: 'relative',
@@ -402,10 +616,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.spacing.xs,
     marginTop: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
   },
   locationText: {
     ...theme.typography.caption,
     color: theme.colors.textSecondary,
     fontStyle: 'italic',
+  },
+  
+  // ✅ Add photo viewer styles
+  photoViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoViewerCloseButton: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 22,
+  },
+  photoViewerImageContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: theme.spacing.lg,
+  },
+  photoViewerImage: {
+    width: screenWidth - (theme.spacing.lg * 2),
+    height: screenHeight - 200,
+    borderRadius: theme.radius.lg,
   },
 });

@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../src/constants/theme';
 import { useJournal } from '../src/context/JournalContext';
-import EfficientPeriodAnalyzer, { PeriodAnalysis } from '../src/services/periodAnalyzerEfficient';
+import PeriodAnalyzer, { PeriodAnalysis } from '../src/services/periodAnalyzer';
 import { Stack } from 'expo-router';
 
 
@@ -67,7 +67,7 @@ export default function MonthReviewScreen() {
     setError(null);
 
     try {
-      const result = await EfficientPeriodAnalyzer.analyzeMonthEntries(month.startDate, month.endDate);
+      const result = await PeriodAnalyzer.analyzeMonthEntries(month.startDate, month.endDate);
       setAnalysis(result);
     } catch (err) {
       console.error('Month analysis failed:', err);
