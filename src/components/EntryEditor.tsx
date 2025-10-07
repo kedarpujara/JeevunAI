@@ -1,4 +1,4 @@
-// components/EntryEditor.tsx - Fixed to allow full editing functionality
+// components/EntryEditor.tsx - Fixed to allow full editing functionality with proper scrolling
 
 import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Image, TextInput, Platform } from 'react-native';
@@ -32,7 +32,7 @@ interface EntryEditorProps {
   isEditing?: boolean;
 }
 
-// ✅ Helper function to format location display - shows city, state, country
+// Helper function to format location display - shows city, state, country
 const formatLocationDisplay = (location: LocationData): string => {
   const parts = [];
 
@@ -76,6 +76,7 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
     const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
+    const [contentInputHeight, setContentInputHeight] = useState(200); // Dynamic height for content input
     const insets = useSafeAreaInsets();
 
     useImperativeHandle(ref, () => ({
@@ -121,6 +122,14 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
           onUpdateEntry({ ...entryData, entryDate: newDate });
         }
       }
+    };
+
+    // Handle content size change to dynamically adjust input height
+    const handleContentSizeChange = (event: any) => {
+      const { height } = event.nativeEvent.contentSize;
+      // Set minimum height of 200, maximum of 600, and adjust based on content
+      const newHeight = Math.max(200, Math.min(600, height + 20));
+      setContentInputHeight(newHeight);
     };
 
     const toggleDatePicker = () => {
@@ -262,21 +271,32 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
                 value={entryData.title}
                 onChangeText={(title) => onUpdateEntry({ ...entryData, title })}
                 maxLength={100}
+                returnKeyType="next"
+                blurOnSubmit={false}
               />
             </View>
 
-            {/* Content Input */}
+            {/* Content Input - FIXED */}
             <View style={styles.inputSection}>
               <TextInput
-                style={styles.contentInput}
+                style={[
+                  styles.contentInput,
+                  { height: Math.max(contentInputHeight, 200) } // Dynamic height with minimum
+                ]}
                 placeholder={isTranscribing ? "Transcribing audio..." : "What's on your mind?"}
                 placeholderTextColor={theme.colors.textSecondary}
                 value={entryData.content}
                 onChangeText={(content) => onUpdateEntry({ ...entryData, content })}
-                multiline
+                multiline={true}
                 textAlignVertical="top"
                 editable={!isTranscribing}
-                scrollEnabled={true}
+                scrollEnabled={true} // ✅ ENABLE SCROLLING
+                onContentSizeChange={handleContentSizeChange} // ✅ DYNAMIC HEIGHT
+                returnKeyType="default"
+                blurOnSubmit={false}
+                keyboardType="default"
+                autoCorrect={true}
+                spellCheck={true}
               />
             </View>
 
@@ -446,15 +466,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     padding: theme.spacing.md,
     backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     minHeight: 50,
   },
   contentInput: {
     ...theme.typography.body,
     color: theme.colors.text,
     padding: theme.spacing.md,
-    minHeight: 200,
-    maxHeight: 400,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    minHeight: 200, // Minimum height
     lineHeight: 24,
+    // Remove maxHeight to allow unlimited growth
   },
   actionButtons: {
     flexDirection: 'row',
@@ -486,6 +513,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: theme.spacing.sm,
     padding: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   locationText: {
     ...theme.typography.body,
