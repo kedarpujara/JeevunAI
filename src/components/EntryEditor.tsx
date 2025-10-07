@@ -276,7 +276,7 @@ const EntryEditor = forwardRef<EntryEditorRef, EntryEditorProps>(
                 multiline
                 textAlignVertical="top"
                 editable={!isTranscribing}
-                scrollEnabled={false}
+                scrollEnabled={true}
               />
             </View>
 

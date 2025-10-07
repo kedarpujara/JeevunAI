@@ -14,7 +14,7 @@ const config: ExpoConfig = {
   slug: SLUG,
   icon: './assets/images/quill_logo.png',
   scheme: 'quill',  
-  version: '1.0.0',  
+  version: '1.0.1',  
   orientation: 'portrait',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
@@ -22,7 +22,7 @@ const config: ExpoConfig = {
   ios: {
     bundleIdentifier: 'com.kedarpujara.quill',
     supportsTablet: true,
-    buildNumber: '6',
+    buildNumber: '1',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false, 
       NSCameraUsageDescription: 'Quill needs camera access to let you add images from your camera to your journal entries.',
@@ -47,6 +47,8 @@ const config: ExpoConfig = {
     permissions: [
       'android.permission.RECORD_AUDIO',
       'android.permission.MODIFY_AUDIO_SETTINGS',
+      "USE_BIOMETRIC",
+      "USE_FINGERPRINT",
     ],
   },
   androidStatusBar: {

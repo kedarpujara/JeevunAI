@@ -8,6 +8,7 @@ import { theme } from '../src/constants/theme';
 import { useJournal } from '../src/context/JournalContext';
 import PeriodAnalyzer, { PeriodAnalysis } from '../src/services/periodAnalyzer';
 import { Stack } from 'expo-router';
+import analytics from '@/utils/analytics';
 
 
 export default function WeekReviewScreen() {
@@ -51,7 +52,11 @@ export default function WeekReviewScreen() {
         weeks.push({ label, startDate: startStr, endDate: endStr });
       }
     }
-
+    analytics.logTrack('weekly_entries_viewed', {
+      total_days: Object.keys(entries).length,
+      total_entries: entries.length
+    });
+    
     return weeks;
   }, [entries]);
 

@@ -14,6 +14,7 @@ import { Entry, GroupedEntries } from '../types/journal';
 import { formatDisplayDate } from '../utils/format';
 import PeriodAnalyzer from '../services/periodAnalyzer';
 import { supabase } from '@/services/supabase';
+import analytics from '@/utils/analytics';
 
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import EntryDetailSheet, { EntryDetailSheetRef } from '../components/EntryDetailSheet';
@@ -74,7 +75,7 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>('all');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('earliest');
   
   const [showWeekSelector, setShowWeekSelector] = useState(false);
   const [showMonthSelector, setShowMonthSelector] = useState(false);
@@ -107,9 +108,19 @@ export default function HistoryScreen() {
     try {
       const savedFilter = await AsyncStorage.getItem(STORAGE_KEYS.TIMELINE_FILTER);
       const savedSort = await AsyncStorage.getItem(STORAGE_KEYS.SORT_ORDER);
+      await AsyncStorage.removeItem('timeline_filter');
       
-      if (savedFilter) setTimelineFilter(savedFilter as TimelineFilter);
-      if (savedSort) setSortOrder(savedSort as SortOrder);
+      if (savedFilter) { 
+        setTimelineFilter(savedFilter as TimelineFilter);
+      } else {
+        setTimelineFilter('all');
+      }
+
+      if (savedSort) {
+        setSortOrder(savedSort as SortOrder);
+      } else {
+        setSortOrder('earliest'); // Default to 'earliest first'
+      }
     } catch (error) {
       console.log('Error loading preferences:', error);
     }
@@ -126,6 +137,19 @@ export default function HistoryScreen() {
   useEffect(() => { 
     loadGroupedEntries(); 
   }, [entries, timelineFilter]);
+
+  useEffect(() => {
+    const filtered = getFilteredEntries();
+    // Only track when user actually sees the history screen with entries
+    if (Object.keys(filtered).length > 0) {
+      analytics.logTrack('journal_history_viewed', {
+        total_days: Object.keys(filtered).length,
+        total_entries: Object.values(filtered).flat().length,
+        filter_type: timelineFilter,
+        sort_order: sortOrder
+      });
+    }
+  }, [timelineFilter, sortOrder]); // Track when these change
 
   const loadGroupedEntries = async () => {
     const grouped = await entriesService.groupEntriesByDay();
@@ -235,6 +259,7 @@ export default function HistoryScreen() {
   }, [refreshEntries]);
 
   const handleEntryPress = (entry: Entry) => {
+    analytics.logEntryOpened(entry.id, entry.date);
     presentDetails(entry);
   };
 
@@ -409,6 +434,12 @@ export default function HistoryScreen() {
   }, [router, processingTap]);
 
   const handleTimelineFilterChange = (filter: TimelineFilter) => {
+    analytics.logTrack('timeline_filter_changed', {
+      old_filter: timelineFilter,
+      new_filter: filter,
+      total_entries: Object.values(groupedEntries).flat().length
+    });
+    
     setTimelineFilter(filter);
     savePreference(STORAGE_KEYS.TIMELINE_FILTER, filter);
     
@@ -424,6 +455,10 @@ export default function HistoryScreen() {
 
   const handleSortOrderChange = () => {
     const newOrder = sortOrder === 'latest' ? 'earliest' : 'latest';
+    analytics.logTrack('timeline_sort_changed', {
+      old_sort: sortOrder,
+      new_sort: newOrder
+    });
     setSortOrder(newOrder);
     savePreference(STORAGE_KEYS.SORT_ORDER, newOrder);
   };
@@ -442,6 +477,15 @@ export default function HistoryScreen() {
   const days = Object.keys(filteredEntries).sort((a, b) => 
     sortOrder === 'latest' ? b.localeCompare(a) : a.localeCompare(b)
   );
+
+  console.log('🔍 HistoryScreen Debug:', {
+    totalEntries: entries.length,
+    filteredEntriesCount: Object.keys(filteredEntries).length,
+    daysCount: days.length,
+    timelineFilter,
+    selectedWeek,
+    selectedMonth
+  });
   
   if (days.length === 0) {
     return (

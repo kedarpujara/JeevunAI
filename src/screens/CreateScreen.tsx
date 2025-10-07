@@ -210,7 +210,7 @@ export default function CreateScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsMultipleSelection: true,
       quality: 0.8,
       base64: false,
@@ -230,7 +230,10 @@ export default function CreateScreen() {
       Alert.alert('Permission Denied', 'Please allow camera access.');
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: false });
+    const result = await ImagePicker.launchCameraAsync({ 
+      quality: 0.8, 
+      base64: false 
+    });
     if (!result.canceled && result.assets?.[0]) {
       setEntryData((prev) => ({
         ...prev,

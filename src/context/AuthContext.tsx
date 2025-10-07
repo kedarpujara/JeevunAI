@@ -1,8 +1,9 @@
-// src/context/AuthContext.tsx
+// src/context/AuthContext.tsx - Updated to manage encryption keys
 import {
   broadcastProfileUpdated, ensureDefaultAvatar, ensureUserProfile
 } from '@/services/profile';
 import { supabase } from '@/services/supabase';
+import { EntriesService } from '@/services/entries';
 import type { AuthChangeEvent, Session, User } from '@supabase/supabase-js';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -81,6 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (event === 'SIGNED_OUT') {
+          // Clear encryption keys on sign out for security
+          console.log('Clearing encryption keys on logout');
+          EntriesService.clearEncryption();
           // Optionally: clear any per-user caches here if you keep them in memory
           // (JournalContext already refetches from DB on mount/when needed)
         }
@@ -119,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw error;
 
-    // If confirmations are OFF, you’ll get a session right away; seed the profile now.
+    // If confirmations are OFF, you'll get a session right away; seed the profile now.
     const u = data.session?.user ?? null;
     if (u) await seedProfileFor(u);
 
@@ -127,6 +131,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut: AuthContextValue['signOut'] = async () => {
+    // Clear encryption keys before signing out for security
+    console.log('Clearing encryption keys before logout');
+    EntriesService.clearEncryption();
+    
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     // user state will be cleared by onAuthStateChange listener

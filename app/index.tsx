@@ -1,17 +1,25 @@
-// app/index.tsx - Root redirect file
-
+// app/index.tsx - Root redirect file with session tracking
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Alert } from 'react-native';
-import { ENV, hostedFunctionsBaseUrl } from '@/config/env';
+import analytics from '../src/utils/analytics'
+import 'react-native-get-random-values'
 
 export default function Index() {
   const router = useRouter();
 
   useEffect(() => {
-    // Redirect to main tabs immediately
-    router.replace('/(tabs)');
+    const initializeAnalytics = async () => {
+      await analytics.init()
+      router.replace('/(tabs)');
+    }
+    
+    initializeAnalytics()
+
+    // Track app termination when component unmounts
+    return () => {
+      analytics.logAppTerminated()
+    }
   }, []);
 
   return (

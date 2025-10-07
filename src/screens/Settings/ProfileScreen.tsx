@@ -61,8 +61,10 @@ export default function ProfileScreen() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9
+      mediaTypes: [ImagePicker.MediaType.Image],  // ✅ new API
+      allowsMultipleSelection: true,
+      quality: 0.8,
+      base64: false,
     });
     if (!result.canceled && result.assets[0]) {
       setAvatarUrl(result.assets[0].uri);

@@ -1,8 +1,8 @@
 // app/day-detail.tsx - Based on your working version with fixes
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View, Modal, Dimensions, Alert, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Stack } from 'expo-router';
@@ -18,6 +18,8 @@ import { entriesService } from '../services/entries'; // ✅ Add this import
 import PeriodAnalyzer from '../services/periodAnalyzer'; // ✅ Add this import
 import * as ImagePicker from 'expo-image-picker';
 import { getCurrentLocation } from '../services/locationService';
+import analytics from '@/utils/analytics';
+
 
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -27,9 +29,13 @@ export default function DayDetailScreen() {
   const params = useLocalSearchParams();
   const { updateEntry, deleteEntry } = useJournal(); // ✅ Add deleteEntry back
 
-  const entries: Entry[] = params.entriesData
-    ? JSON.parse(params.entriesData as string)
-    : [];
+  // Replace the entries parsing with this:
+  const entries: Entry[] = useMemo(() => {
+    return params.entriesData
+      ? JSON.parse(params.entriesData as string)
+      : [];
+  }, [params.entriesData]);
+  
   const date = params.date as string;
 
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null);
@@ -45,14 +51,60 @@ export default function DayDetailScreen() {
   const editorSheetRef = useRef<EntryEditorRef>(null);
 
   const presentDetails = useCallback((entry: Entry) => {
+    analytics.logEntryOpened(entry.id, entry.date);
+
     setSelectedEntry(entry);
-    requestAnimationFrame(() => detailSheetRef.current?.present?.());
+
+    const startTime = Date.now();
+  
+    requestAnimationFrame(() => {
+      detailSheetRef.current?.present?.();
+      
+      // Store timing data on the ref
+      (detailSheetRef.current as any)._entryViewStartTime = startTime;
+      (detailSheetRef.current as any)._currentViewingEntry = entry;
+    });
   }, []);
 
   const closeDetails = useCallback(() => {
+    // 🚀 END TIMING AND LOG
+    const sheetCurrent = detailSheetRef.current as any;
+    if (sheetCurrent?._entryViewStartTime && sheetCurrent?._currentViewingEntry) {
+      const timeSpent = Date.now() - sheetCurrent._entryViewStartTime;
+      const entry = sheetCurrent._currentViewingEntry;
+      
+      // Only track if they spent more than 1 second viewing
+      if (timeSpent > 1000) {
+        analytics.logTrack('entry_viewing_session', {
+          entry_id: entry.id,
+          entry_date: entry.date,
+          time_spent_ms: timeSpent,
+          time_spent_seconds: Math.round(timeSpent / 1000),
+          viewed_from: 'day_detail'
+        });
+      }
+      
+      // Clean up
+      delete sheetCurrent._entryViewStartTime;
+      delete sheetCurrent._currentViewingEntry;
+    }
+    
     detailSheetRef.current?.dismiss?.();
     setSelectedEntry(null);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Track when user opens a specific day's detail view
+      analytics.logTrack('day_detail_opened', {
+        entry_date: date,
+        entry_count: entries.length,
+        total_photos: entries.reduce((sum, entry) => sum + (entry.photoUris?.length || 0), 0),
+        has_location: entries.some(entry => entry.locationData)
+      });
+    }, [date, entries])
+  );
+
 
   // ✅ Add photo handling
   const handlePhotoPress = useCallback((photoUri: string) => {
@@ -73,7 +125,7 @@ export default function DayDetailScreen() {
     }
     
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsMultipleSelection: true,
       quality: 0.8,
       base64: false,
@@ -367,6 +419,7 @@ export default function DayDetailScreen() {
           onDismiss={closeDetails}
           onEdit={handleEdit}
           onDelete={handleDelete}
+          onPhotoPress={handlePhotoPress} // Add this line
         />
 
         {entryData && (
